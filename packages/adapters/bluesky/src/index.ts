@@ -6,6 +6,7 @@ export {
   DEFAULT_APPVIEW as BLUESKY_DEFAULT_APPVIEW,
   GET_POSTS_MAX,
   linkedVideos,
+  shortLinks,
   postWebUrl,
   type BlueskyAdapterOptions,
   type SearchParams as BlueskySearchParams,

@@ -119,12 +119,13 @@ describe('submit-url', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('asks for the full URL instead of following TikTok short links', async () => {
+  it('passes recognized TikTok short links on to the pipeline (they need the database)', async () => {
     const h = harness();
     await h.run('submit-url', 'https://vm.tiktok.com/ZMabc/', '--json');
     const parsed = JSON.parse(h.out.join('\n')) as { ok: boolean; error: { message: string } };
     expect(parsed.ok).toBe(false);
-    expect(parsed.error.message).toMatch(/paste the full/);
+    // It got past URL validation and failed only on the unreachable test database.
+    expect(parsed.error.message).not.toMatch(/unsupported URL/);
   });
 });
 

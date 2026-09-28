@@ -79,10 +79,10 @@ describe('resolveVideoUrl: TikTok', () => {
     'https://vm.tiktok.com/ZMabc123/',
     'https://vt.tiktok.com/ZSabc/',
     'https://www.tiktok.com/t/ZTabc/',
-  ])('rejects short link %s with guidance instead of following it', (input) => {
+  ])('recognizes short link %s without following it (pure, no network)', (input) => {
     const r = resolveVideoUrl(input);
     expect(r).toMatchObject({ ok: false, reason: 'short_link', platform: 'tiktok' });
-    if (!r.ok) expect(r.message).toMatch(/paste the full/);
+    if (!r.ok) expect(r.message).toMatch(/until its redirect is expanded/);
   });
 
   it.each([

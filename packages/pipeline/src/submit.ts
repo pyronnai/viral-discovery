@@ -69,10 +69,14 @@ function canonicalAdapter(deps: PipelineDeps, platform: string): SourceAdapter |
  */
 export async function submitUrl(deps: PipelineDeps, url: string): Promise<SubmitResult> {
   const resolved = resolveVideoUrl(url);
-  if (!resolved.ok) throw new UnsupportedUrlError(resolved.reason, resolved.message);
+  // Short links have a known platform but no identity until the recording adapter expands them.
+  const expandable =
+    !resolved.ok && resolved.reason === 'short_link' && resolved.platform !== undefined;
+  if (!resolved.ok && !expandable) throw new UnsupportedUrlError(resolved.reason, resolved.message);
+  const platform = resolved.platform as string;
 
-  const recorder = submissionAdapter(deps, resolved.platform);
-  if (!recorder) throw new PipelineError(`no adapter can record ${resolved.platform} URLs`);
+  const recorder = submissionAdapter(deps, platform);
+  if (!recorder) throw new PipelineError(`no adapter can record ${platform} URLs`);
   const source = await ensureSource(deps.db, recorder.manifest);
   const lookup = recorder.lookupUrl?.bind(recorder);
   if (!lookup) throw new PipelineError(`adapter "${recorder.manifest.id}" cannot look up URLs`);
@@ -96,7 +100,12 @@ export async function submitUrl(deps: PipelineDeps, url: string): Promise<Submit
     );
   }
 
-  const enrichment = await enrich(deps, resolved.platform, url, videoId);
+  const [stored] = await deps.db
+    .select({ platform: schema.videos.platform, canonicalUrl: schema.videos.canonicalUrl })
+    .from(schema.videos)
+    .where(eq(schema.videos.id, videoId));
+  if (!stored) throw new PipelineError('submitted video vanished');
+  const enrichment = await enrich(deps, stored.platform, stored.canonicalUrl, videoId);
 
   const [video] = await deps.db
     .select({

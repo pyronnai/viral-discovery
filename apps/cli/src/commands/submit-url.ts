@@ -17,7 +17,8 @@ export function registerSubmitUrl(program: Command, io: CommandIO): void {
       try {
         // Reject unsupported URLs before touching configuration or the database.
         const resolved = resolveVideoUrl(url);
-        if (!resolved.ok)
+        // Recognized short links (TikTok /t/, vm., vt.) are expanded by the recording adapter.
+        if (!resolved.ok && resolved.reason !== 'short_link')
           throw new CliError(`unsupported URL (${resolved.reason}): ${resolved.message}`);
         const runtime = loadRuntime(io);
         const result = await withPipeline(runtime, (deps) => submitUrl(deps, url));

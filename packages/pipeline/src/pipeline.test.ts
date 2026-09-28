@@ -432,10 +432,59 @@ describe('submitUrl', () => {
 
   it('rejects unsupported URLs before writing anything', async () => {
     const deps = testDeps(db, [manual()], clock.now);
-    for (const url of ['https://vimeo.com/123', 'https://vm.tiktok.com/ZMabc/', 'nonsense']) {
+    for (const url of [
+      'https://vimeo.com/123',
+      'https://www.tiktok.com/@x/photo/7412345678901234567',
+      'nonsense',
+    ]) {
       await expect(submitUrl(deps, url)).rejects.toBeInstanceOf(UnsupportedUrlError);
     }
     expect(await db.select().from(schema.discoveryRuns)).toEqual([]);
+  });
+});
+
+describe('submitUrl with a TikTok short link', () => {
+  it('stores the expanded canonical video; the same video by full URL is not duplicated', async () => {
+    const fetch = createFakeFetch([
+      {
+        match: (u) => u.href === 'https://www.tiktok.com/t/ZTshort1/',
+        responses: [
+          {
+            status: 301,
+            body: '',
+            headers: {
+              location: 'https://www.tiktok.com/@fixture.creator/video/7412345678901234567?_r=1',
+            },
+          },
+        ],
+      },
+      route('/oembed', { body: oembed }),
+    ]);
+    const deps = testDeps(db, [createManualUrlAdapter({ fetch })], clock.now);
+    const viaShort = await submitUrl(deps, 'https://www.tiktok.com/t/ZTshort1/');
+    expect(viaShort.video).toMatchObject({
+      platform: 'tiktok',
+      platformVideoId: '7412345678901234567',
+    });
+    clock.advance(HOUR);
+    await submitUrl(deps, 'https://www.tiktok.com/@fixture.creator/video/7412345678901234567');
+    expect(await all.videos()).toHaveLength(1);
+    const [first] = await all.sightings();
+    expect(first?.sighting.context).toMatchObject({
+      expandedFrom: 'https://www.tiktok.com/t/ZTshort1/',
+    });
+  });
+
+  it('reports an unresolvable short link without storing a video', async () => {
+    const fetch = createFakeFetch([
+      {
+        match: (u) => u.hostname === 'vm.tiktok.com',
+        responses: [{ status: 302, body: '', headers: { location: 'https://www.tiktok.com/' } }],
+      },
+    ]);
+    const deps = testDeps(db, [createManualUrlAdapter({ fetch })], clock.now);
+    await expect(submitUrl(deps, 'https://vm.tiktok.com/ZMbad/')).rejects.toThrow(/not_a_video/);
+    expect(await all.videos()).toEqual([]);
   });
 });
 

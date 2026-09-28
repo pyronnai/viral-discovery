@@ -17,6 +17,7 @@ import {
 } from '@vd/adapter-contract';
 import { buildReadings, metricUnavailable, metricValue, type MetricReadings } from '@vd/core';
 import { resolveVideoUrl, type ResolvedVideoUrl } from '@vd/url-identity';
+import { expandTikTokShortLink, isTikTokShortLink, type ShortLinkResult } from '@vd/url-resolution';
 
 export const BLUESKY_ADAPTER_ID = 'bluesky';
 const SERVICE = 'bluesky';
@@ -45,6 +46,12 @@ export const manifest = AdapterManifestSchema.parse({
       unit: 'requests',
       defaultDailyBudget: null,
       notes: 'AppView limits are described as "generous" and not published',
+    },
+    {
+      name: 'tiktok-shortlink',
+      unit: 'expansions',
+      defaultDailyBudget: null,
+      notes: 'TikTok share links found in posts, expanded via allowlisted HEAD redirects',
     },
   ],
   requiredEnv: [],
@@ -119,12 +126,22 @@ const GetPostsResponse = z.object({ posts: z.array(z.unknown()) });
 /** What an item is: a Bluesky-native video, or a link to a video on another platform. */
 const Payload = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('native'), post: PostView }),
-  z.object({ kind: z.literal('link'), post: PostView, url: z.string() }),
+  z.object({
+    kind: z.literal('link'),
+    post: PostView,
+    url: z.string(),
+    /** Canonical URL after expanding a short link (TikTok /t/, vm., vt.). */
+    resolvedUrl: z.string().optional(),
+    /** Why a short link could not be expanded; the item is quarantined. */
+    expansionError: z.string().optional(),
+  }),
 ]);
 
 export interface BlueskyAdapterOptions {
   fetch?: FetchLike;
   appviewUrl?: string;
+  /** Expand TikTok short links found in posts (default true). */
+  expandShortLinks?: boolean;
 }
 
 /** at://did/app.bsky.feed.post/rkey → https://bsky.app/profile/did/post/rkey */
@@ -155,8 +172,7 @@ function externalEmbed(embed: unknown): z.infer<typeof ExternalView>['external']
   return null;
 }
 
-/** Every supported video a post links to (link card + rich-text links), once per identity. */
-export function linkedVideos(post: PostView): { url: string; resolved: ResolvedVideoUrl }[] {
+function postUrls(post: PostView): string[] {
   const urls: string[] = [];
   const card = externalEmbed(post.embed);
   if (card) urls.push(card.uri);
@@ -165,6 +181,17 @@ export function linkedVideos(post: PostView): { url: string; resolved: ResolvedV
       if (feature.$type === 'app.bsky.richtext.facet#link' && feature.uri) urls.push(feature.uri);
     }
   }
+  return urls;
+}
+
+/** Short links in a post that need network expansion before they have an identity. */
+export function shortLinks(post: PostView): string[] {
+  return [...new Set(postUrls(post).filter(isTikTokShortLink))];
+}
+
+/** Every supported video a post links to (link card + rich-text links), once per identity. */
+export function linkedVideos(post: PostView): { url: string; resolved: ResolvedVideoUrl }[] {
+  const urls = postUrls(post);
   const seen = new Set<string>();
   const out: { url: string; resolved: ResolvedVideoUrl }[] = [];
   for (const url of urls) {
@@ -216,6 +243,7 @@ function date(value: string | undefined): Date | null {
 
 export function createBlueskyAdapter(options: BlueskyAdapterOptions = {}): SourceAdapter {
   const fetchImpl = options.fetch ?? globalThis.fetch;
+  const expandShortLinks = options.expandShortLinks ?? true;
   const appview = (options.appviewUrl ?? DEFAULT_APPVIEW).replace(/\/+$/, '');
 
   async function xrpc(method: string, query: URLSearchParams, ctx: AdapterContext) {
@@ -265,6 +293,17 @@ export function createBlueskyAdapter(options: BlueskyAdapterOptions = {}): Sourc
       let cursor: string | undefined;
       let yielded = 0;
       let rank = 0;
+      // One expansion per distinct short link per run.
+      const expansions = new Map<string, ShortLinkResult>();
+      const expand = async (url: string) => {
+        let result = expansions.get(url);
+        if (!result) {
+          consumeQuota(ctx.quota, 'tiktok-shortlink');
+          result = await expandTikTokShortLink(url, { fetch: fetchImpl, signal: ctx.signal });
+          expansions.set(url, result);
+        }
+        return result;
+      };
       for (let page = 1; page <= params.pages; page++) {
         if (ctx.signal.aborted || yielded >= req.limit) return;
         const query = new URLSearchParams(base);
@@ -306,7 +345,46 @@ export function createBlueskyAdapter(options: BlueskyAdapterOptions = {}): Sourc
             } satisfies RawItem;
           }
           if (params.include === 'native') continue;
-          for (const { url, resolved } of linkedVideos(post.data)) {
+          const linked = linkedVideos(post.data);
+          const seenIds = new Set(
+            linked.map((l) => `${l.resolved.platform}:${l.resolved.platformVideoId}`),
+          );
+          const expanded: { url: string; resolved?: ResolvedVideoUrl; error?: string }[] = [];
+          if (expandShortLinks) {
+            for (const url of shortLinks(post.data)) {
+              const result = await expand(url);
+              if (!result.ok) {
+                expanded.push({ url, error: `${result.reason}: ${result.message}` });
+                continue;
+              }
+              const key = `${result.resolved.platform}:${result.resolved.platformVideoId}`;
+              if (seenIds.has(key)) continue;
+              seenIds.add(key);
+              expanded.push({ url, resolved: result.resolved });
+            }
+          }
+          for (const { url, resolved, error } of expanded) {
+            if (yielded >= req.limit) return;
+            yielded += 1;
+            // Failed expansions are yielded too, so the run quarantines them visibly.
+            yield {
+              adapterId: BLUESKY_ADAPTER_ID,
+              externalId: resolved
+                ? `${post.data.uri}#${resolved.platform}:${resolved.platformVideoId}`
+                : `${post.data.uri}#unresolved:${url}`,
+              fetchedAt,
+              payload: resolved
+                ? { kind: 'link', post: item, url, resolvedUrl: resolved.canonicalUrl }
+                : { kind: 'link', post: item, url, expansionError: error },
+              context: {
+                ...context,
+                linkedUrl: url,
+                ...(resolved ? { expandedTo: resolved.canonicalUrl } : {}),
+              },
+              observationKey: post.data.uri,
+            } satisfies RawItem;
+          }
+          for (const { url, resolved } of linked) {
             if (yielded >= req.limit) return;
             yielded += 1;
             yield {
@@ -371,7 +449,10 @@ export function createBlueskyAdapter(options: BlueskyAdapterOptions = {}): Sourc
       const { post } = payload;
 
       if (payload.kind === 'link') {
-        const resolved = resolveVideoUrl(payload.url);
+        if (payload.expansionError) {
+          throw new Error(`short link not resolved: ${payload.expansionError}`);
+        }
+        const resolved = resolveVideoUrl(payload.resolvedUrl ?? payload.url);
         if (!resolved.ok)
           throw new Error(`linked URL is not a supported video: ${resolved.message}`);
         const card = externalEmbed(post.embed);

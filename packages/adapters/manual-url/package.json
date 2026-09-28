@@ -13,6 +13,7 @@
     "@vd/adapter-contract": "workspace:^",
     "@vd/core": "workspace:^",
     "@vd/url-identity": "workspace:^",
+    "@vd/url-resolution": "workspace:^",
     "zod": "^4.6.5"
   },
   "devDependencies": {

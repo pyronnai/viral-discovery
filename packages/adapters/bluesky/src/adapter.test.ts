@@ -247,3 +247,84 @@ describe('bluesky refreshMetrics', () => {
     ]);
   });
 });
+
+describe('bluesky TikTok short links', () => {
+  const shortPost = {
+    ...multiPost!,
+    uri: 'at://did:plc:fixtureauthor000000000006/app.bsky.feed.post/3fixturepost6',
+    embed: {
+      $type: 'app.bsky.embed.external#view',
+      external: { uri: 'https://www.tiktok.com/t/ZTshort1/', title: 'TikTok', description: '' },
+    },
+    record: { ...multiPost!.record, facets: [] },
+  };
+  const brokenPost = {
+    ...shortPost,
+    uri: 'at://did:plc:fixtureauthor000000000007/app.bsky.feed.post/3fixturepost7',
+    embed: {
+      $type: 'app.bsky.embed.external#view',
+      external: { uri: 'https://vm.tiktok.com/ZMbroken/', title: 'TikTok', description: '' },
+    },
+  };
+  const video = 'https://www.tiktok.com/@fixture.creator/video/7412345678901234567?_r=1&_t=x';
+
+  it('expands short links once per run and quarantines failures instead of dropping them', async () => {
+    const fetch = createFakeFetch([
+      route(SEARCH, {
+        body: {
+          posts: [
+            shortPost,
+            { ...shortPost, uri: shortPost.uri.replace('post6', 'post8') },
+            brokenPost,
+          ],
+        },
+      }),
+      {
+        match: (u) => u.href === 'https://www.tiktok.com/t/ZTshort1/',
+        responses: [{ status: 301, body: '', headers: { location: video } }],
+      },
+      {
+        match: (u) => u.hostname === 'vm.tiktok.com',
+        responses: [
+          { status: 302, body: '', headers: { location: 'https://www.tiktok.com/?_r=1' } },
+        ],
+      },
+    ]);
+    const adapter = createBlueskyAdapter({ fetch });
+    const ctx = testAdapterContext();
+    const items = await collect(
+      adapter.discoverSearch!({ kind: 'search', params: { q: 'x' }, region: null, limit: 10 }, ctx),
+    );
+
+    expect(items.map((i) => i.externalId)).toEqual([
+      `${shortPost.uri}#tiktok:7412345678901234567`,
+      `${shortPost.uri.replace('post6', 'post8')}#tiktok:7412345678901234567`,
+      `${brokenPost.uri}#unresolved:https://vm.tiktok.com/ZMbroken/`,
+    ]);
+    // The same short link in two posts is expanded once.
+    expect(fetch.requests.filter((r) => r.url.pathname === '/t/ZTshort1/')).toHaveLength(1);
+    expect(ctx.quota.usage()).toMatchObject({ 'tiktok-shortlink': 2 });
+
+    expect(adapter.normalize(items[0]!)).toMatchObject({
+      platform: 'tiktok',
+      platformVideoId: '7412345678901234567',
+      canonicalUrl: 'https://www.tiktok.com/@fixture.creator/video/7412345678901234567',
+      metrics: null,
+    });
+    expect(items[0]!.context).toMatchObject({ linkedUrl: 'https://www.tiktok.com/t/ZTshort1/' });
+    const broken = safeNormalize(adapter, items[2]!);
+    expect(!broken.ok && broken.errors.join()).toMatch(/short link not resolved: not_a_video/);
+  });
+
+  it('can be disabled', async () => {
+    const fetch = createFakeFetch([route(SEARCH, { body: { posts: [shortPost] } })]);
+    const items = await collect(
+      createBlueskyAdapter({ fetch, expandShortLinks: false }).discoverSearch!(
+        { kind: 'search', params: { q: 'x' }, region: null, limit: 10 },
+        testAdapterContext(),
+      ),
+    );
+    expect(items).toEqual([]);
+    expect(fetch.requests).toHaveLength(1);
+  });
+});

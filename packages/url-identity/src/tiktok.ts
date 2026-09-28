@@ -6,16 +6,17 @@ const VIDEO_ID = /^\d{5,25}$/;
 const HANDLE = /^@[A-Za-z0-9._]{1,64}$/;
 
 /**
- * Only the documented form `https://www.tiktok.com/@{handle}/video/{id}` is
- * accepted (it is the format in TikTok's oEmbed documentation). Other shapes are
- * rejected rather than guessed at.
+ * Only the documented form `https://www.tiktok.com/@{handle}/video/{id}` resolves
+ * (it is the format in TikTok's oEmbed documentation). Short/share links are
+ * recognized (reason "short_link") but this package never follows them — that
+ * network step lives in @vd/url-resolution. Other shapes are rejected, not guessed.
  */
 export const resolveTikTok: PlatformResolver = (url) => {
   const host = url.hostname.toLowerCase();
   if (SHORT_HOSTS.has(host) || (HOSTS.has(host) && url.pathname.startsWith('/t/'))) {
     return rejected(
       'short_link',
-      'TikTok short links redirect to the real URL; open the link and paste the full https://www.tiktok.com/@user/video/<id> URL instead',
+      'TikTok short link: it has no video id until its redirect is expanded (network step, see @vd/url-resolution)',
       'tiktok',
     );
   }

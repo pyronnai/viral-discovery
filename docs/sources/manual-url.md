@@ -16,7 +16,9 @@ pnpm cli submit-url 'https://clips.twitch.tv/SomeClipSlug'
 
 - URL identity comes from `@vd/url-identity` (pure; no network). Supported:
   - **YouTube**: `watch?v=`, `youtu.be/`, `/shorts/`, `/embed/`, `/live/`, `m.`, `music.`, `youtube-nocookie.com`
-  - **TikTok**: `tiktok.com/@user/video/<id>` (`www.`, `m.`)
+  - **TikTok**: `tiktok.com/@user/video/<id>` (`www.`, `m.`), plus short links
+    `tiktok.com/t/<code>`, `vm.tiktok.com/<code>`, `vt.tiktok.com/<code>` expanded by
+    allowlisted redirects (`@vd/url-resolution`, see `tiktok.md`)
   - **Twitch clips**: `clips.twitch.tv/<id>`, `clips.twitch.tv/embed?clip=<id>`, `twitch.tv/<channel>/clip/<id>`
 - Anything else is **rejected with a reason** (`invalid_url`, `unsupported_host`,
   `unsupported_path`, `short_link`) before any configuration or database access.
@@ -51,7 +53,6 @@ TikTok oEmbed: no published limit; one request per TikTok submission. YouTube en
 
 ## LIMITATIONS
 
-- TikTok short links must be expanded by the user.
 - YouTube/Twitch submissions without their adapter configured store identity only
   (`availability: unknown`, no title).
 

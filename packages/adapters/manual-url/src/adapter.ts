@@ -11,6 +11,7 @@ import {
   type SourceAdapter,
 } from '@vd/adapter-contract';
 import { resolveVideoUrl } from '@vd/url-identity';
+import { expandTikTokShortLink, type ShortLinkFailure } from '@vd/url-resolution';
 
 export const MANUAL_URL_ADAPTER_ID = 'manual-url';
 /** TikTok's documented oEmbed endpoint (developers.tiktok.com/doc/embed-videos, updated 2026-08-04). */
@@ -33,6 +34,13 @@ export const manifest = AdapterManifestSchema.parse({
   metricsProvided: [],
   referencePlatforms: ['youtube', 'tiktok', 'twitch'],
   quotaBuckets: [
+    {
+      name: 'tiktok-shortlink',
+      unit: 'expansions',
+      defaultDailyBudget: null,
+      notes:
+        'HEAD requests to allowlisted TikTok hosts to expand /t/, vm., vt. share links (≤3 hops each)',
+    },
     {
       name: 'tiktok-oembed',
       unit: 'requests',
@@ -60,8 +68,24 @@ export type TikTokOEmbed = z.infer<typeof TikTokOEmbedSchema>;
 
 const Payload = z.object({
   submittedUrl: z.string(),
+  /** Canonical URL after short-link expansion, when the submission was a short link. */
+  resolvedUrl: z.string().nullable().optional(),
   oembed: TikTokOEmbedSchema.nullable(),
 });
+
+function failureKind(reason: ShortLinkFailure) {
+  switch (reason) {
+    case 'timeout':
+      return 'timeout' as const;
+    case 'network':
+      return 'network' as const;
+    case 'http_error':
+    case 'not_a_video':
+      return 'not_found' as const;
+    default:
+      return 'invalid_response' as const;
+  }
+}
 
 export interface ManualUrlAdapterOptions {
   fetch?: FetchLike;
@@ -116,7 +140,21 @@ export function createManualUrlAdapter(options: ManualUrlAdapterOptions = {}): S
     manifest,
 
     async lookupUrl(url: string, ctx: AdapterContext): Promise<RawItem | null> {
-      const resolved = resolveVideoUrl(url);
+      let resolved = resolveVideoUrl(url);
+      let expandedFrom: string | null = null;
+      if (!resolved.ok && resolved.reason === 'short_link' && resolved.platform === 'tiktok') {
+        consumeQuota(ctx.quota, 'tiktok-shortlink');
+        const expanded = await expandTikTokShortLink(url, { fetch: fetchImpl, signal: ctx.signal });
+        if (!expanded.ok) {
+          throw new UpstreamError(
+            'tiktok-shortlink',
+            failureKind(expanded.reason),
+            `short link not resolved (${expanded.reason}): ${expanded.message}`,
+          );
+        }
+        resolved = expanded.resolved;
+        expandedFrom = url;
+      }
       if (!resolved.ok) return null;
       // Only TikTok is enriched here (its oEmbed needs no credentials). YouTube and
       // Twitch submissions are recorded by identity; their own adapters add metadata.
@@ -126,14 +164,22 @@ export function createManualUrlAdapter(options: ManualUrlAdapterOptions = {}): S
         adapterId: MANUAL_URL_ADAPTER_ID,
         externalId: `${resolved.platform}:${resolved.platformVideoId}`,
         fetchedAt: ctx.now(),
-        payload: { submittedUrl: url, oembed },
-        context: { submittedUrl: url, urlKind: resolved.kind },
+        payload: {
+          submittedUrl: url,
+          resolvedUrl: expandedFrom ? resolved.canonicalUrl : null,
+          oembed,
+        },
+        context: {
+          submittedUrl: url,
+          urlKind: resolved.kind,
+          ...(expandedFrom ? { expandedFrom, expandedTo: resolved.canonicalUrl } : {}),
+        },
       };
     },
 
     normalize(raw: RawItem): NormalizedVideo {
-      const { submittedUrl, oembed } = Payload.parse(raw.payload);
-      const resolved = resolveVideoUrl(submittedUrl);
+      const { submittedUrl, resolvedUrl, oembed } = Payload.parse(raw.payload);
+      const resolved = resolveVideoUrl(resolvedUrl ?? submittedUrl);
       if (!resolved.ok) throw new Error(`unsupported URL: ${resolved.message}`);
       const handle = tiktokHandle(oembed?.author_url);
       return {

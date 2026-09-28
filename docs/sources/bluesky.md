@@ -79,9 +79,11 @@ page is recorded in the `default` bucket for local accounting.
 - Unauthenticated search working on `api.bsky.app` is **observed, not guaranteed**.
 - Native videos have no duration, so `--max-duration` keeps them (counted as
   `keptWithUnknownDuration`).
-- **TikTok short links** (`vm.tiktok.com`, `vt.tiktok.com`) are not resolved; in a live
-  sample of 49 TikTok links on Bluesky, **42 were short links**. Only full
-  `tiktok.com/@user/video/<id>` URLs become sightings.
+- **TikTok short links** (42 of 49 TikTok links in the 2026-09-28 sample) are expanded
+  during discovery via `@vd/url-resolution` (allowlisted HEAD redirects; see `tiktok.md`),
+  once per distinct link per run (`tiktok-shortlink` bucket). Failed expansions are
+  **quarantined** on the run with their reason. Disable with `expandShortLinks: false`.
+  Live 2026-09-29: 50/50 TikTok links resolved.
 - Search cursors may not reach the whole result set.
 
 ## COMPLIANCE CONSIDERATIONS
@@ -94,6 +96,5 @@ page is recorded in the `default` bucket for local accounting.
 
 1. Will unauthenticated `searchPosts` remain available on `api.bsky.app`? If not, add
    optional app-password auth via a PDS.
-2. Should TikTok short links be resolved (one HEAD request per link to TikTok)? That is a
-   policy decision — it is not an official TikTok API.
+2. TikTok short-link expansion depends on observed (undocumented) redirects.
 3. Bluesky's developer guidelines on retaining post data were not reviewed this session.

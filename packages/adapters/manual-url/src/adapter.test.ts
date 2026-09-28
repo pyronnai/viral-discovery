@@ -113,11 +113,61 @@ describe('manual-url lookupUrl', () => {
     });
   });
 
-  it('returns null for unsupported URLs and short links', async () => {
+  it('returns null for unsupported URLs', async () => {
     const adapter = createManualUrlAdapter({ fetch: createFakeFetch([]) });
-    for (const url of ['https://vimeo.com/1', 'https://vm.tiktok.com/ZMabc/', 'not a url']) {
+    for (const url of [
+      'https://vimeo.com/1',
+      'https://www.tiktok.com/@x/photo/7412345678901234567',
+      'not a url',
+    ]) {
       expect(await adapter.lookupUrl!(url, testAdapterContext())).toBeNull();
     }
+  });
+
+  it('expands a TikTok short link (allowlisted HEAD redirect) and then uses oEmbed', async () => {
+    const fetch = createFakeFetch([
+      {
+        match: (u, method) => u.href === 'https://www.tiktok.com/t/ZTshort1/' && method === 'HEAD',
+        responses: [{ status: 301, body: '', headers: { location: TIKTOK } }],
+      },
+      route('/oembed', { body: oembed }),
+    ]);
+    const adapter = createManualUrlAdapter({ fetch });
+    const ctx = testAdapterContext();
+    const item = await adapter.lookupUrl!('https://www.tiktok.com/t/ZTshort1/', ctx);
+    expect(item).toMatchObject({
+      externalId: 'tiktok:7412345678901234567',
+      context: {
+        expandedFrom: 'https://www.tiktok.com/t/ZTshort1/',
+        expandedTo: 'https://www.tiktok.com/@fixture.creator/video/7412345678901234567',
+      },
+    });
+    expect(fetch.requests[1]?.url.searchParams.get('url')).toBe(
+      'https://www.tiktok.com/@fixture.creator/video/7412345678901234567',
+    );
+    expect(ctx.quota.usage()).toEqual({ 'tiktok-shortlink': 1, 'tiktok-oembed': 1 });
+    expect(adapter.normalize(item!)).toMatchObject({
+      platform: 'tiktok',
+      platformVideoId: '7412345678901234567',
+    });
+  });
+
+  it('fails with a reason when a short link redirects somewhere unexpected', async () => {
+    const fetch = createFakeFetch([
+      {
+        match: (u) => u.hostname === 'vm.tiktok.com',
+        responses: [
+          { status: 302, body: '', headers: { location: 'https://evil.example/@x/video/1234567' } },
+        ],
+      },
+    ]);
+    const err = await createManualUrlAdapter({ fetch }).lookupUrl!(
+      'https://vm.tiktok.com/ZMabc/',
+      testAdapterContext(),
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UpstreamError);
+    expect((err as Error).message).toMatch(/unexpected_host/);
+    expect(fetch.requests).toHaveLength(1);
   });
 
   it('fails cleanly when TikTok returns no embed', async () => {
