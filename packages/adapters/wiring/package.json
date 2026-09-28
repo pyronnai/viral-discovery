@@ -1,0 +1,23 @@
+{
+  "name": "@vd/adapter-wiring",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vd/adapter-bluesky": "workspace:^",
+    "@vd/adapter-contract": "workspace:^",
+    "@vd/adapter-manual-url": "workspace:^",
+    "@vd/adapter-twitch": "workspace:^",
+    "@vd/adapter-youtube": "workspace:^",
+    "@vd/config": "workspace:^"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.2"
+  }
+}

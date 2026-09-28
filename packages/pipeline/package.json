@@ -1,0 +1,29 @@
+{
+  "name": "@vd/pipeline",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vd/adapter-contract": "workspace:^",
+    "@vd/config": "workspace:^",
+    "@vd/core": "workspace:^",
+    "@vd/db": "workspace:^",
+    "@vd/url-identity": "workspace:^",
+    "drizzle-orm": "^0.45.3"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@vd/adapter-bluesky": "workspace:^",
+    "@vd/adapter-manual-url": "workspace:^",
+    "@vd/adapter-twitch": "workspace:^",
+    "@vd/adapter-youtube": "workspace:^",
+    "pino": "^10.3.1",
+    "vitest": "^5.0.2"
+  }
+}

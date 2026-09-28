@@ -116,6 +116,13 @@ export const discoveryRuns = pgTable(
     itemsFound: integer('items_found').notNull().default(0),
     itemsNew: integer('items_new').notNull().default(0),
     error: text('error'),
+    /** What was asked: adapter, query kind, params, region, limit, filters. */
+    request: jsonb('request').$type<Record<string, unknown>>().notNull().default({}),
+    /**
+     * Per-run evidence for debugging: counts of ingested/filtered/invalid items plus
+     * capped samples of filtered and quarantined items (nothing is dropped silently).
+     */
+    stats: jsonb('stats').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
   (t) => [index('discovery_runs_source_id_idx').on(t.sourceId)],
@@ -203,9 +210,19 @@ export const sightings = pgTable(
       onDelete: 'set null',
     }),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
+    /**
+     * Distinguishes observations of one video within one run (e.g. the Bluesky post
+     * that linked it, or the regional chart it appeared in).
+     */
+    observationKey: text('observation_key').notNull().default(''),
     seenAt: tz('seen_at').notNull().defaultNow(),
   },
-  (t) => [index('sightings_video_id_idx').on(t.videoId)],
+  (t) => [
+    index('sightings_video_id_idx').on(t.videoId),
+    // Re-running the same run (e.g. a retried job) cannot duplicate sightings;
+    // a new run records a new sighting — presence over time is evidence.
+    unique('sightings_run_video_observation_uq').on(t.discoveryRunId, t.videoId, t.observationKey),
+  ],
 );
 
 // ── metrics & scoring ──────────────────────────────────────────────────────

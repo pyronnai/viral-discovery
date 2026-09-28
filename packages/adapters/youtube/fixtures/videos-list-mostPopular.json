@@ -1,0 +1,80 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "fixture-etag-1",
+  "nextPageToken": "CAIQAA",
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "fixture-etag-a",
+      "id": "vdFixture01",
+      "snippet": {
+        "publishedAt": "2026-09-27T14:03:11Z",
+        "channelId": "UCvdFixtureChannel000001",
+        "title": "Cat discovers the vacuum cleaner",
+        "description": "He was not ready. #shorts",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/vdFixture01/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/vdFixture01/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "Fixture Pets",
+        "categoryId": "15",
+        "liveBroadcastContent": "none",
+        "defaultAudioLanguage": "en"
+      },
+      "contentDetails": {
+        "duration": "PT42S",
+        "dimension": "2d",
+        "definition": "hd",
+        "caption": "false"
+      },
+      "statistics": {
+        "viewCount": "50000",
+        "likeCount": "4200",
+        "favoriteCount": "0",
+        "commentCount": "310"
+      }
+    },
+    {
+      "kind": "youtube#video",
+      "etag": "fixture-etag-b",
+      "id": "vdFixture02",
+      "snippet": {
+        "publishedAt": "2026-09-26T09:00:00Z",
+        "channelId": "UCvdFixtureChannel000002",
+        "title": "Top 10 kitchen fails (full episode)",
+        "description": "",
+        "thumbnails": {
+          "maxres": {
+            "url": "https://i.ytimg.com/vi/vdFixture02/maxresdefault.jpg",
+            "width": 1280,
+            "height": 720
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/vdFixture02/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "Fixture Comedy",
+        "categoryId": "23",
+        "liveBroadcastContent": "none"
+      },
+      "contentDetails": { "duration": "PT12M3S" },
+      "statistics": { "viewCount": "910000", "favoriteCount": "0" }
+    },
+    {
+      "kind": "youtube#video",
+      "etag": "fixture-etag-c",
+      "id": "vdFixture03"
+    }
+  ],
+  "pageInfo": { "totalResults": 200, "resultsPerPage": 3 }
+}

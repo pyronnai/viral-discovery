@@ -1,0 +1,43 @@
+{
+  "data": [
+    {
+      "id": "FixtureFunnyClipOne-AbC123dEf456GhI7",
+      "url": "https://clips.twitch.tv/FixtureFunnyClipOne-AbC123dEf456GhI7",
+      "embed_url": "https://clips.twitch.tv/embed?clip=FixtureFunnyClipOne-AbC123dEf456GhI7",
+      "broadcaster_id": "100000001",
+      "broadcaster_name": "FixtureStreamer",
+      "creator_id": "200000001",
+      "creator_name": "fixture_clipper",
+      "video_id": "3000000001",
+      "game_id": "509658",
+      "language": "en",
+      "title": "chat made me do it",
+      "view_count": 18234,
+      "created_at": "2026-09-27T21:14:05Z",
+      "thumbnail_url": "https://static-cdn.jtvnw.net/twitch-clips/fixture-one-preview-480x272.jpg",
+      "duration": 27.5,
+      "vod_offset": 4812,
+      "is_featured": false
+    },
+    {
+      "id": "FixtureFunnyClipTwo-JkL890mNo123PqR4",
+      "url": "https://clips.twitch.tv/FixtureFunnyClipTwo-JkL890mNo123PqR4",
+      "embed_url": "https://clips.twitch.tv/embed?clip=FixtureFunnyClipTwo-JkL890mNo123PqR4",
+      "broadcaster_id": "100000002",
+      "broadcaster_name": "AnotherFixture",
+      "creator_id": "200000002",
+      "creator_name": "another_clipper",
+      "video_id": "",
+      "game_id": "509658",
+      "language": "other",
+      "title": "",
+      "view_count": 950,
+      "created_at": "2026-09-28T02:40:00Z",
+      "thumbnail_url": "",
+      "duration": 60,
+      "vod_offset": null,
+      "is_featured": true
+    }
+  ],
+  "pagination": { "cursor": "eyJiIjpudWxsLCJhIjp7Ik9mZnNldCI6Mn19" }
+}

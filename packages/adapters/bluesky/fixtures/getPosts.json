@@ -1,0 +1,24 @@
+{
+  "posts": [
+    {
+      "uri": "at://did:plc:fixtureauthor000000000002/app.bsky.feed.post/3fixturepost2",
+      "cid": "bafyreifixturecid0000000000000000000000000000000000000002",
+      "author": { "did": "did:plc:fixtureauthor000000000002", "handle": "dogclips.fixture.test" },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "createdAt": "2026-09-28T08:00:00.000Z",
+        "text": "my dog trying to catch snow 😂"
+      },
+      "embed": {
+        "$type": "app.bsky.embed.video#view",
+        "cid": "bafkreifixturevideo",
+        "playlist": "https://video.bsky.app/watch/x/playlist.m3u8"
+      },
+      "replyCount": 31,
+      "repostCount": 150,
+      "likeCount": 2048,
+      "quoteCount": 7,
+      "indexedAt": "2026-09-28T08:00:03.000Z"
+    }
+  ]
+}

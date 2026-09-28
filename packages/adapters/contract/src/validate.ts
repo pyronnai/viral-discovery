@@ -1,7 +1,13 @@
-import { MetricReadingsSchema, type MetricKey } from '@vd/core';
+import { MetricReadingsSchema, type MetricKey, type MetricReadings } from '@vd/core';
 import { CAPABILITY_METHODS, type SourceAdapter } from './adapter.ts';
 import { AdapterCapabilitySchema, AdapterManifestSchema } from './manifest.ts';
-import { NormalizedVideoSchema, type NormalizedVideo, type RawItem } from './normalized.ts';
+import {
+  MetricRefreshResultSchema,
+  NormalizedVideoSchema,
+  type MetricRefreshResult,
+  type NormalizedVideo,
+  type RawItem,
+} from './normalized.ts';
 
 export class AdapterContractError extends Error {
   readonly problems: readonly string[];
@@ -78,17 +84,71 @@ export function safeNormalize(adapter: SourceAdapter, raw: RawItem): NormalizeRe
   }
   const value = parsed.data;
   const errors: string[] = [];
-  if (value.platform !== adapter.manifest.platform) {
-    errors.push(`platform "${value.platform}" != manifest platform "${adapter.manifest.platform}"`);
-  }
-  if (value.metrics) {
-    const provided = new Set<MetricKey>(adapter.manifest.metricsProvided);
-    const readings = MetricReadingsSchema.parse(value.metrics);
-    for (const [key, reading] of Object.entries(readings) as [MetricKey, typeof readings.views][]) {
-      if (reading.kind === 'value' && !provided.has(key)) {
-        errors.push(`metric "${key}" has a value but is not in manifest.metricsProvided`);
-      }
+  const { manifest } = adapter;
+  if (isReference(adapter, value)) {
+    if (!manifest.referencePlatforms.includes(value.platform)) {
+      errors.push(
+        `platform "${value.platform}" is neither the manifest platform "${manifest.platform}" nor in manifest.referencePlatforms`,
+      );
     }
+    // Engagement seen on a referencing post is not engagement of the video itself.
+    if (value.metrics) {
+      errors.push(`a reference to a "${value.platform}" video must not carry metrics`);
+    }
+  } else if (value.metrics) {
+    errors.push(...undeclaredMetricErrors(adapter, value.metrics));
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value };
+}
+
+/**
+ * True when the adapter observed a video hosted on another platform (e.g. a
+ * link in a post). References never overwrite canonical data or carry metrics.
+ */
+export function isReference(adapter: SourceAdapter, video: Pick<NormalizedVideo, 'platform'>) {
+  return video.platform !== adapter.manifest.platform;
+}
+
+function undeclaredMetricErrors(adapter: SourceAdapter, metrics: MetricReadings): string[] {
+  const provided = new Set<MetricKey>(adapter.manifest.metricsProvided);
+  const readings = MetricReadingsSchema.parse(metrics);
+  const errors: string[] = [];
+  for (const [key, reading] of Object.entries(readings) as [MetricKey, typeof readings.views][]) {
+    if (reading.kind === 'value' && !provided.has(key)) {
+      errors.push(`metric "${key}" has a value but is not in manifest.metricsProvided`);
+    }
+  }
+  return errors;
+}
+
+export type RefreshResultCheck =
+  | { ok: true; value: MetricRefreshResult }
+  | { ok: false; platformVideoId: string | null; errors: string[] };
+
+/** Validates refreshMetrics() output with the same rules as safeNormalize(). Never throws. */
+export function checkRefreshResults(
+  adapter: SourceAdapter,
+  results: readonly unknown[],
+): RefreshResultCheck[] {
+  return results.map((result) => {
+    const parsed = MetricRefreshResultSchema.safeParse(result);
+    if (!parsed.success) {
+      const id =
+        typeof result === 'object' &&
+        result !== null &&
+        'platformVideoId' in result &&
+        typeof result.platformVideoId === 'string'
+          ? result.platformVideoId
+          : null;
+      return {
+        ok: false,
+        platformVideoId: id,
+        errors: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+      };
+    }
+    const errors = parsed.data.metrics ? undeclaredMetricErrors(adapter, parsed.data.metrics) : [];
+    return errors.length > 0
+      ? { ok: false, platformVideoId: parsed.data.platformVideoId, errors }
+      : { ok: true, value: parsed.data };
+  });
 }

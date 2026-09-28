@@ -1,0 +1,177 @@
+{
+  "posts": [
+    {
+      "uri": "at://did:plc:fixtureauthor000000000001/app.bsky.feed.post/3fixturepost1",
+      "cid": "bafyreifixturecid0000000000000000000000000000000000000001",
+      "author": {
+        "did": "did:plc:fixtureauthor000000000001",
+        "handle": "funnyfinds.fixture.test",
+        "displayName": "Funny Finds (fixture)",
+        "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:fixtureauthor000000000001/fixture@jpeg"
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "createdAt": "2026-09-28T09:15:00.000Z",
+        "text": "this cat has no fear youtube.com/shorts/vdFixture01…",
+        "langs": ["en"],
+        "embed": {
+          "$type": "app.bsky.embed.external",
+          "external": {
+            "uri": "https://youtube.com/shorts/vdFixture01?is=trackingParam",
+            "title": "cat vs vacuum 😂 - YouTube",
+            "description": "YouTube video by Fixture Pets"
+          }
+        },
+        "facets": [
+          {
+            "index": { "byteStart": 23, "byteEnd": 50 },
+            "features": [
+              {
+                "$type": "app.bsky.richtext.facet#link",
+                "uri": "https://youtube.com/shorts/vdFixture01?is=trackingParam"
+              }
+            ]
+          },
+          {
+            "index": { "byteStart": 0, "byteEnd": 4 },
+            "features": [{ "$type": "app.bsky.richtext.facet#tag", "tag": "funny" }]
+          }
+        ]
+      },
+      "embed": {
+        "$type": "app.bsky.embed.external#view",
+        "external": {
+          "uri": "https://youtube.com/shorts/vdFixture01?is=trackingParam",
+          "title": "cat vs vacuum 😂 - YouTube",
+          "description": "YouTube video by Fixture Pets",
+          "thumb": "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:fixtureauthor000000000001/fixturethumb@jpeg"
+        }
+      },
+      "bookmarkCount": 0,
+      "replyCount": 3,
+      "repostCount": 12,
+      "likeCount": 87,
+      "quoteCount": 1,
+      "indexedAt": "2026-09-28T09:15:02.000Z",
+      "labels": []
+    },
+    {
+      "uri": "at://did:plc:fixtureauthor000000000002/app.bsky.feed.post/3fixturepost2",
+      "cid": "bafyreifixturecid0000000000000000000000000000000000000002",
+      "author": { "did": "did:plc:fixtureauthor000000000002", "handle": "dogclips.fixture.test" },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "createdAt": "2026-09-28T08:00:00.000Z",
+        "text": "my dog trying to catch snow 😂",
+        "langs": ["en"],
+        "embed": {
+          "$type": "app.bsky.embed.video",
+          "video": {
+            "$type": "blob",
+            "ref": { "$link": "bafkreifixturevideo" },
+            "mimeType": "video/mp4",
+            "size": 1843200
+          },
+          "aspectRatio": { "width": 1080, "height": 1920 }
+        }
+      },
+      "embed": {
+        "$type": "app.bsky.embed.video#view",
+        "cid": "bafkreifixturevideo",
+        "playlist": "https://video.bsky.app/watch/did%3Aplc%3Afixtureauthor000000000002/bafkreifixturevideo/playlist.m3u8",
+        "thumbnail": "https://video.bsky.app/watch/did%3Aplc%3Afixtureauthor000000000002/bafkreifixturevideo/thumbnail.jpg",
+        "aspectRatio": { "width": 1080, "height": 1920 }
+      },
+      "replyCount": 9,
+      "repostCount": 40,
+      "likeCount": 512,
+      "quoteCount": 2,
+      "indexedAt": "2026-09-28T08:00:03.000Z",
+      "labels": []
+    },
+    {
+      "uri": "at://did:plc:fixtureauthor000000000003/app.bsky.feed.post/3fixturepost3",
+      "cid": "bafyreifixturecid0000000000000000000000000000000000000003",
+      "author": {
+        "did": "did:plc:fixtureauthor000000000003",
+        "handle": "clipcurator.fixture.test",
+        "displayName": ""
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "createdAt": "2026-09-27T22:00:00.000Z",
+        "text": "two for one: tiktok + the twitch clip it came from",
+        "facets": [
+          {
+            "index": { "byteStart": 0, "byteEnd": 10 },
+            "features": [
+              {
+                "$type": "app.bsky.richtext.facet#link",
+                "uri": "https://clips.twitch.tv/FixtureFunnyClipOne-AbC123dEf456GhI7"
+              }
+            ]
+          }
+        ]
+      },
+      "embed": {
+        "$type": "app.bsky.embed.recordWithMedia#view",
+        "record": {
+          "record": {
+            "$type": "app.bsky.embed.record#viewNotFound",
+            "uri": "at://did:plc:gone/app.bsky.feed.post/x",
+            "notFound": true
+          }
+        },
+        "media": {
+          "$type": "app.bsky.embed.external#view",
+          "external": {
+            "uri": "https://www.tiktok.com/@fixture.creator/video/7412345678901234567?is_from_webapp=1",
+            "title": "TikTok · fixture.creator",
+            "description": ""
+          }
+        }
+      },
+      "replyCount": 0,
+      "repostCount": 2,
+      "likeCount": 15,
+      "quoteCount": 0,
+      "indexedAt": "2026-09-27T22:00:01.000Z"
+    },
+    {
+      "uri": "at://did:plc:fixtureauthor000000000004/app.bsky.feed.post/3fixturepost4",
+      "cid": "bafyreifixturecid0000000000000000000000000000000000000004",
+      "author": { "did": "did:plc:fixtureauthor000000000004", "handle": "news.fixture.test" },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "createdAt": "2026-09-27T20:00:00.000Z",
+        "text": "funny article"
+      },
+      "embed": {
+        "$type": "app.bsky.embed.external#view",
+        "external": {
+          "uri": "https://news.example.com/funny-story",
+          "title": "A funny story",
+          "description": ""
+        }
+      },
+      "likeCount": 1,
+      "indexedAt": "2026-09-27T20:00:01.000Z"
+    },
+    {
+      "uri": "at://did:plc:fixtureauthor000000000005/app.bsky.feed.post/3fixturepost5",
+      "cid": "bafyreifixturecid0000000000000000000000000000000000000005",
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "author is missing from this malformed view"
+      },
+      "embed": {
+        "$type": "app.bsky.embed.video#view",
+        "cid": "bafkreifixturevideo5",
+        "playlist": "https://video.bsky.app/watch/x/y/playlist.m3u8"
+      },
+      "indexedAt": "2026-09-27T19:00:00.000Z"
+    }
+  ],
+  "cursor": "25",
+  "hitsTotal": 10000
+}

@@ -10,6 +10,8 @@ export interface CheckResult {
 export interface CommandIO {
   out(line: string): void;
   err(line: string): void;
+  /** Environment to read configuration from; defaults to process.env (tests inject one). */
+  env?: Record<string, string | undefined>;
 }
 
 export const processIO: CommandIO = {

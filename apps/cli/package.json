@@ -9,11 +9,16 @@
     "start": "node --env-file-if-exists=../../.env --import tsx src/main.ts"
   },
   "dependencies": {
+    "@vd/adapter-contract": "workspace:^",
+    "@vd/adapter-wiring": "workspace:^",
     "@vd/config": "workspace:^",
     "@vd/core": "workspace:^",
     "@vd/db": "workspace:^",
+    "@vd/pipeline": "workspace:^",
+    "@vd/url-identity": "workspace:^",
     "commander": "^15.0.0",
-    "drizzle-orm": "^0.45.3"
+    "drizzle-orm": "^0.45.3",
+    "pino": "^10.3.1"
   },
   "devDependencies": {
     "tsx": "^4.23.15"

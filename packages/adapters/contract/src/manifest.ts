@@ -48,6 +48,13 @@ export const AdapterManifestSchema = z
     capabilities: z.array(AdapterCapabilitySchema).min(1),
     /** Metrics this adapter can actually return. Anything else must be reported unavailable. */
     metricsProvided: z.array(MetricKeySchema),
+    /**
+     * Other platforms whose videos this adapter may *reference* — e.g. a Bluesky post
+     * linking to a YouTube video. A reference identifies the canonical video and
+     * records where it was seen, but it is never authoritative about that video:
+     * it carries no metrics and never overwrites data from the canonical platform.
+     */
+    referencePlatforms: z.array(PlatformIdSchema).default([]),
     quotaBuckets: z.array(QuotaBucketSchema).default([]),
     /** Env var names the adapter needs. Values are never stored in the manifest. */
     requiredEnv: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/)).default([]),
@@ -60,6 +67,13 @@ export const AdapterManifestSchema = z
     }
     if (new Set(m.capabilities).size !== m.capabilities.length) {
       ctx.addIssue({ code: 'custom', path: ['capabilities'], message: 'duplicate capability' });
+    }
+    if (m.referencePlatforms.includes(m.platform)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['referencePlatforms'],
+        message: 'an adapter cannot reference its own platform',
+      });
     }
   });
 export type AdapterManifest = z.infer<typeof AdapterManifestSchema>;

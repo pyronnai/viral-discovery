@@ -1,0 +1,22 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "fixture-etag-2",
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "fixture-etag-d",
+      "id": "vdFixture04",
+      "snippet": {
+        "publishedAt": "2026-09-28T01:30:00Z",
+        "channelId": "UCvdFixtureChannel000001",
+        "title": "Dog vs. sprinkler, round 2",
+        "thumbnails": { "medium": { "url": "https://i.ytimg.com/vi/vdFixture04/mqdefault.jpg" } },
+        "channelTitle": "Fixture Pets",
+        "liveBroadcastContent": "none"
+      },
+      "contentDetails": { "duration": "PT1M" },
+      "statistics": { "viewCount": "1200", "likeCount": "88", "commentCount": "4" }
+    }
+  ],
+  "pageInfo": { "totalResults": 200, "resultsPerPage": 1 }
+}

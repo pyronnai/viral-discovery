@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 /**
  * Environment schema. Every variable the application reads must be declared here.
- * Source credentials (YouTube, Reddit, …) are intentionally absent until their
- * adapters exist — see .env.example.
+ * Source credentials are optional: an adapter is only registered when its own
+ * variables are set, so one missing key never blocks unrelated sources.
  */
 export const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -23,7 +23,17 @@ export const EnvSchema = z.object({
     .default('pgboss'),
 
   WORKER_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(0).max(600_000).default(30_000),
+
+  // ── source adapters (all optional; see docs/sources/*.md) ─────────────────
+  YOUTUBE_API_KEY: z.string().min(1).optional(),
+  TWITCH_CLIENT_ID: z.string().min(1).optional(),
+  TWITCH_CLIENT_SECRET: z.string().min(1).optional(),
+  /** Unauthenticated Bluesky AppView host. Defaults to https://api.bsky.app. */
+  BLUESKY_APPVIEW_URL: z.url({ protocol: /^https$/ }).optional(),
 });
+
+/** Names of variables that hold secrets. Never print their values. */
+export const SECRET_ENV_KEYS = ['YOUTUBE_API_KEY', 'TWITCH_CLIENT_SECRET'] as const;
 
 export type AppConfig = z.infer<typeof EnvSchema>;
 

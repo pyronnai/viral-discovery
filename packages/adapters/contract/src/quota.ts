@@ -35,3 +35,18 @@ export function createInMemoryQuotaBudget(limits: Readonly<Record<string, number
     },
   };
 }
+
+/** Thrown when a run's local budget for a bucket is exhausted; the run ends as "partial". */
+export class QuotaBudgetExhaustedError extends Error {
+  readonly bucket: string;
+  constructor(bucket: string) {
+    super(`local quota budget for bucket "${bucket}" is exhausted`);
+    this.name = 'QuotaBudgetExhaustedError';
+    this.bucket = bucket;
+  }
+}
+
+/** Records usage before a metered call, or throws QuotaBudgetExhaustedError. */
+export function consumeQuota(quota: QuotaBudget, bucket: string, units = 1): void {
+  if (!quota.tryConsume(bucket, units)) throw new QuotaBudgetExhaustedError(bucket);
+}

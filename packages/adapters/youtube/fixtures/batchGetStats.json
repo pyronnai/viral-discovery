@@ -1,0 +1,24 @@
+{
+  "kind": "youtube#batchGetStatsResponse",
+  "etag": "fixture-etag-stats",
+  "items": [
+    {
+      "kind": "youtube#videoStats",
+      "etag": "fixture-etag-s1",
+      "id": "vdFixture01",
+      "statistics": { "viewCount": "110000", "likeCount": "9100", "commentCount": "602" }
+    },
+    {
+      "kind": "youtube#videoStats",
+      "etag": "fixture-etag-s2",
+      "id": "vdFixture02",
+      "statistics": { "viewCount": "915000" }
+    }
+  ],
+  "summary": {
+    "requestedVideoCount": 3,
+    "succeededVideoCount": 2,
+    "failedVideoCount": 1,
+    "failedVideoIds": ["vdFixture09"]
+  }
+}

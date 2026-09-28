@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "type": "video",
+  "title": "when the cat hears the treat bag #funny #cat",
+  "author_url": "https://www.tiktok.com/@fixture.creator",
+  "author_name": "Fixture Creator",
+  "width": "100%",
+  "height": "100%",
+  "html": "<blockquote class=\"tiktok-embed\" cite=\"https://www.tiktok.com/@fixture.creator/video/7412345678901234567\" data-video-id=\"7412345678901234567\"><section></section></blockquote><script async src=\"https://www.tiktok.com/embed.js\"></script>",
+  "thumbnail_width": 576,
+  "thumbnail_height": 1024,
+  "thumbnail_url": "https://p16-sign.tiktokcdn-us.com/fixture/thumbnail.jpeg?x-expires=1790000000&x-signature=fixture",
+  "provider_url": "https://www.tiktok.com",
+  "provider_name": "TikTok"
+}

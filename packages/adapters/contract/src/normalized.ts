@@ -17,6 +17,11 @@ export const RawItemSchema = z.object({
   payload: z.unknown(),
   /** Discovery context, e.g. {"subreddit": "funny", "rank": 3}. Becomes Sighting.context. */
   context: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Distinguishes separate observations of the same video within one run (e.g. two
+   * posts linking it, or two regional charts). Defaults to externalId.
+   */
+  observationKey: z.string().min(1).optional(),
 });
 export type RawItem = z.infer<typeof RawItemSchema>;
 

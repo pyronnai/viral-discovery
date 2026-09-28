@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   const worker = await startWorker({
     config,
     logger,
-    registry: buildAdapterRegistry(),
+    registry: buildAdapterRegistry(config),
     handlers: {}, // Phase 1: no job handlers.
   });
 

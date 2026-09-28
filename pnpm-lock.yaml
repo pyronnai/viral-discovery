@@ -41,6 +41,12 @@ importers:
 
   apps/cli:
     dependencies:
+      '@vd/adapter-contract':
+        specifier: workspace:^
+        version: link:../../packages/adapters/contract
+      '@vd/adapter-wiring':
+        specifier: workspace:^
+        version: link:../../packages/adapters/wiring
       '@vd/config':
         specifier: workspace:^
         version: link:../../packages/config
@@ -50,12 +56,21 @@ importers:
       '@vd/db':
         specifier: workspace:^
         version: link:../../packages/db
+      '@vd/pipeline':
+        specifier: workspace:^
+        version: link:../../packages/pipeline
+      '@vd/url-identity':
+        specifier: workspace:^
+        version: link:../../packages/url-identity
       commander:
         specifier: ^15.0.0
         version: 15.0.0
       drizzle-orm:
         specifier: ^0.45.3
-        version: 0.45.3(@types/pg@8.23.1)(pg@8.23.0)
+        version: 0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0)
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
     devDependencies:
       tsx:
         specifier: ^4.23.15
@@ -66,6 +81,9 @@ importers:
       '@vd/adapter-contract':
         specifier: workspace:^
         version: link:../../packages/adapters/contract
+      '@vd/adapter-wiring':
+        specifier: workspace:^
+        version: link:../../packages/adapters/wiring
       '@vd/config':
         specifier: workspace:^
         version: link:../../packages/config
@@ -77,7 +95,7 @@ importers:
         version: link:../../packages/db
       drizzle-orm:
         specifier: ^0.45.3
-        version: 0.45.3(@types/pg@8.23.1)(pg@8.23.0)
+        version: 0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0)
       pg-boss:
         specifier: ^12.35.0
         version: 12.35.0
@@ -89,6 +107,28 @@ importers:
         specifier: ^4.23.15
         version: 4.23.15
 
+  packages/adapters/bluesky:
+    dependencies:
+      '@vd/adapter-contract':
+        specifier: workspace:^
+        version: link:../contract
+      '@vd/core':
+        specifier: workspace:^
+        version: link:../../core
+      '@vd/url-identity':
+        specifier: workspace:^
+        version: link:../../url-identity
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
+
   packages/adapters/contract:
     dependencies:
       '@vd/config':
@@ -97,6 +137,97 @@ importers:
       '@vd/core':
         specifier: workspace:^
         version: link:../../core
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/adapters/manual-url:
+    dependencies:
+      '@vd/adapter-contract':
+        specifier: workspace:^
+        version: link:../contract
+      '@vd/core':
+        specifier: workspace:^
+        version: link:../../core
+      '@vd/url-identity':
+        specifier: workspace:^
+        version: link:../../url-identity
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/adapters/twitch:
+    dependencies:
+      '@vd/adapter-contract':
+        specifier: workspace:^
+        version: link:../contract
+      '@vd/core':
+        specifier: workspace:^
+        version: link:../../core
+      '@vd/url-identity':
+        specifier: workspace:^
+        version: link:../../url-identity
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/adapters/wiring:
+    dependencies:
+      '@vd/adapter-bluesky':
+        specifier: workspace:^
+        version: link:../bluesky
+      '@vd/adapter-contract':
+        specifier: workspace:^
+        version: link:../contract
+      '@vd/adapter-manual-url':
+        specifier: workspace:^
+        version: link:../manual-url
+      '@vd/adapter-twitch':
+        specifier: workspace:^
+        version: link:../twitch
+      '@vd/adapter-youtube':
+        specifier: workspace:^
+        version: link:../youtube
+      '@vd/config':
+        specifier: workspace:^
+        version: link:../../config
+    devDependencies:
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/adapters/youtube:
+    dependencies:
+      '@vd/adapter-contract':
+        specifier: workspace:^
+        version: link:../contract
+      '@vd/core':
+        specifier: workspace:^
+        version: link:../../core
+      '@vd/url-identity':
+        specifier: workspace:^
+        version: link:../../url-identity
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -133,7 +264,7 @@ importers:
         version: link:../core
       drizzle-orm:
         specifier: ^0.45.3
-        version: 0.45.3(@types/pg@8.23.1)(pg@8.23.0)
+        version: 0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0)
       pg:
         specifier: ^8.23.0
         version: 8.23.0
@@ -148,6 +279,51 @@ importers:
         specifier: ^4.23.15
         version: 4.23.15
 
+  packages/pipeline:
+    dependencies:
+      '@vd/adapter-contract':
+        specifier: workspace:^
+        version: link:../adapters/contract
+      '@vd/config':
+        specifier: workspace:^
+        version: link:../config
+      '@vd/core':
+        specifier: workspace:^
+        version: link:../core
+      '@vd/db':
+        specifier: workspace:^
+        version: link:../db
+      '@vd/url-identity':
+        specifier: workspace:^
+        version: link:../url-identity
+      drizzle-orm:
+        specifier: ^0.45.3
+        version: 0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0)
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.8
+        version: 0.5.8
+      '@vd/adapter-bluesky':
+        specifier: workspace:^
+        version: link:../adapters/bluesky
+      '@vd/adapter-manual-url':
+        specifier: workspace:^
+        version: link:../adapters/manual-url
+      '@vd/adapter-twitch':
+        specifier: workspace:^
+        version: link:../adapters/twitch
+      '@vd/adapter-youtube':
+        specifier: workspace:^
+        version: link:../adapters/youtube
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/url-identity: {}
+
 packages:
 
   '@cacheable/memory@2.2.0':
@@ -158,6 +334,9 @@ packages:
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
+
+  '@electric-sql/pglite@0.5.8':
+    resolution: {integrity: sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q==}
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
@@ -1690,6 +1869,8 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
+  '@electric-sql/pglite@0.5.8': {}
+
   '@esbuild-kit/core-utils@3.3.2':
     dependencies:
       esbuild: 0.18.20
@@ -2227,8 +2408,9 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.15
 
-  drizzle-orm@0.45.3(@types/pg@8.23.1)(pg@8.23.0):
+  drizzle-orm@0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0):
     optionalDependencies:
+      '@electric-sql/pglite': 0.5.8
       '@types/pg': 8.23.1
       pg: 8.23.0
 

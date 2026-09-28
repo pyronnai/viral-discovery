@@ -1,17 +1,25 @@
 import type { Command } from 'commander';
 import type { CommandIO } from '../output.ts';
+import { registerAdapters } from './adapters.ts';
 import { registerConfigCheck } from './config-check.ts';
 import { registerDbCheck } from './db-check.ts';
+import { registerDiscover } from './discover.ts';
 import { registerHealth } from './health.ts';
+import { registerRefreshMetrics } from './refresh-metrics.ts';
+import { registerSubmitUrl } from './submit-url.ts';
 
 export type CommandRegistrar = (program: Command, io: CommandIO) => void;
 
 /**
- * Every CLI command is registered here. Future commands (discover, rescore,
- * submit-url) get their own file and one line in this list — nothing else changes.
+ * Every CLI command is registered here. New commands get their own file and one
+ * line in this list — nothing else changes.
  */
 export const COMMANDS: readonly CommandRegistrar[] = [
   registerHealth,
   registerConfigCheck,
   registerDbCheck,
+  registerAdapters,
+  registerDiscover,
+  registerSubmitUrl,
+  registerRefreshMetrics,
 ];

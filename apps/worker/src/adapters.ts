@@ -1,9 +1,8 @@
-import { AdapterRegistry } from '@vd/adapter-contract';
+import type { AppConfig } from '@vd/config';
+import { buildAdapterRegistry as wire } from '@vd/adapter-wiring';
+import type { AdapterRegistry } from '@vd/adapter-contract';
 
-/**
- * The ONLY place platform adapters get wired into the process.
- * Phase 1: intentionally empty. Future phases add e.g. `registry.register(createYouTubeAdapter(...))`.
- */
-export function buildAdapterRegistry(): AdapterRegistry {
-  return new AdapterRegistry();
+/** Adapters available to the worker; wiring lives in @vd/adapter-wiring (shared with the CLI). */
+export function buildAdapterRegistry(config: AppConfig): AdapterRegistry {
+  return wire(config).registry;
 }

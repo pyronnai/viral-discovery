@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { pino } from 'pino';
 import { JOB_NAMES } from '@vd/core';
 import { loadConfig } from '@vd/config';
-import { buildAdapterRegistry } from './adapters.ts';
+import { AdapterRegistry } from '@vd/adapter-contract';
 import { startWorker } from './worker.ts';
 
 /**
@@ -21,7 +21,7 @@ describe.skipIf(!url)('worker startup (integration)', () => {
     const worker = await startWorker({
       config,
       logger: pino({ level: 'silent' }),
-      registry: buildAdapterRegistry(),
+      registry: new AdapterRegistry(),
       handlers: {},
     });
     try {
@@ -42,7 +42,7 @@ describe.skipIf(!url)('worker startup (integration)', () => {
       startWorker({
         config,
         logger: pino({ level: 'silent' }),
-        registry: buildAdapterRegistry(),
+        registry: new AdapterRegistry(),
         handlers: {},
       }),
     ).rejects.toThrow(/database unreachable/);

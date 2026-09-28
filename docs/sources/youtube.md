@@ -1,87 +1,102 @@
 # Source: YouTube
 
-_Researched 2026-09-28. Re-verify before implementing the adapter; this API changed several times in 2025–2026._
-_Adapter status: **not implemented**._
+_Verified 2026-09-28 against the official YouTube Data API v3 reference. Adapter
+status: **implemented** (`packages/adapters/youtube`, adapter id `youtube`)._
 
-Primary references:
+Primary references (all read 2026-09-28):
 
-- Quota and Compliance Audits — https://developers.google.com/youtube/v3/guides/quota_and_compliance_audits (page last updated 2026-09-14)
-- Revision History — https://developers.google.com/youtube/v3/revision_history
-- Quota cost calculator — https://developers.google.com/youtube/v3/determine_quota_cost (**not read this session**)
-- Developer Policies — https://developers.google.com/youtube/terms/developer-policies (**not read this session**)
+- `videos.list` — https://developers.google.com/youtube/v3/docs/videos/list (page updated 2026-09-14)
+- `videos.batchGetStats` — https://developers.google.com/youtube/v3/docs/videos/batchGetStats (updated 2026-09-14)
+- Video resource — https://developers.google.com/youtube/v3/docs/videos (updated 2026-09-16)
+- Revision history — https://developers.google.com/youtube/v3/revision_history (updated 2026-09-14)
+- Quota and compliance audits — https://developers.google.com/youtube/v3/guides/quota_and_compliance_audits (read in Phase 1, same day)
 
 ## VERIFIED CURRENT BEHAVIOR
 
-Read directly from the official pages above on 2026-09-28:
-
-- **Default allocation is split by method.** A project gets 100 `search.list` calls,
-  100 `videos.insert` calls, and 10,000 units per day combined for all other endpoints.
-- **Granular quota buckets (2026-06-01).** YouTube is moving to per-method quota
-  buckets, starting with `videos.insert` and `search.list`; calls to other methods
-  stay in the existing bucket.
-- **`videos.batchGetStats` (2026-06-03).** New method returning video statistics;
-  1 unit per call in its own bucket, default 10,000 units/day.
-- **`mostPopular` chart changed (2025-07-21).** It no longer mirrors the general
-  "Trending Now" list; it now features the Trending Music, Movies, and Gaming charts,
-  alongside the deprecation of YouTube's Trending page.
-- **View counting changed (announced 2026-08-27).** Public views for all formats now
-  count when playback starts from the first frame (including autoplay). Engaged views
-  are unchanged but are used for monetization/analytics, not the public count.
-  Earlier (2025-03-31) Shorts views had already moved to counting every start/replay.
-- **More quota requires a compliance audit** via the Audit and Quota Extension Form.
-- **Dislike counts** are private (only returned to the video owner) since 2021-12-13.
-- **Higher-resolution thumbnail keys** (`fhd`, `qhd`, `uhd`) exist for some videos (2026-09-11).
-- (Publishing, later) Uploads via unverified API projects created after 2020-07-28 are
-  locked to private until the project passes an audit.
-
-## ASSUMPTIONS (unverified — confirm before relying on them)
-
-- Per-call unit cost of `videos.list` and `channels.list` is 1 unit. _Not checked
-  against the current quota calculator this session._
-- `batchGetStats` can replace `videos.list` for metric refreshes. _Its parameters,
-  batch size, and returned fields were not read._
-- Channel upload feeds (Atom/RSS at `youtube.com/feeds/videos.xml`) still exist and
-  are usable for `channel_feed` discovery without quota. _Not verified; also need to
-  confirm how the API Terms apply to feed data._
-- There is no API field that identifies a Short. A duration heuristic would be a guess.
-- Likes can be hidden by creators and then absent from `statistics`.
-  _Map to `hidden_by_owner` only once confirmed in the reference docs._
+- **`videos.list`** costs **1 unit** per call. Filters: `chart=mostPopular`, `id`, or
+  `myRating`. `regionCode` is an ISO 3166-1 alpha-2 code; `videoCategoryId` defaults to
+  `0`; `maxResults` is **1–50 (default 5)**; `pageToken` pages charts (not `id` lookups).
+- **`mostPopular` is no longer "Trending Now".** Since 2025-07-21 it features the
+  _Trending Music, Movies, and Gaming_ charts (revision history, 2025-07-10 entry).
+- **Granular quota buckets (2026-06-01).** `videos.insert` and `search.list` have their
+  own buckets; everything else stays in the existing bucket.
+- **`videos.batchGetStats` (2026-06-03).** `GET https://www.googleapis.com/youtube/v3/videos:batchGetStats`,
+  params `id` (comma-separated, required) and `part` (`contentDetails`, `id`, `snippet`,
+  `statistics`). **1 unit per request in its own bucket, default 10,000 units/day.**
+  Response: `items[].{id, statistics.{viewCount, likeCount, commentCount}, snippet.publishTime, contentDetails.{duration, durationMillis}}`
+  plus `summary.{requestedVideoCount, succeededVideoCount, failedVideoCount, failedVideoIds}`.
+  API keys work for public videos (OAuth required for non-public).
+- **View counting changed:** "Starting August 24, 2026, for all video formats (long-form,
+  Live, and Shorts) … `viewCount` will be updated to count views the moment a video
+  begins to play" (video resource page). Shorts already counted every start/replay since 2025-03-31.
+- `statistics.dislikeCount` is private since 2021-12-13; `favoriteCount` is deprecated (always 0).
+- Thumbnail keys include `default`, `medium`, `high`, `standard`, `maxres`, and newer `fhd`, `qhd`, `uhd`.
+- `contentDetails.duration` is ISO 8601 (`PT15M33S`).
+- The video resource has **no field that identifies a Short.**
 
 ## ACCESS REQUIREMENTS
 
-- Google Cloud project with YouTube Data API v3 enabled; API key for public reads
-  (`YOUTUBE_API_KEY`). OAuth is not needed for public discovery.
-- One API project per API client (per the policies summary; re-read the Developer
-  Policies text before relying on this). Never shard across projects to gain quota.
+- Google Cloud project with YouTube Data API v3 enabled and an API key → `YOUTUBE_API_KEY`.
+- The key is sent in the `X-goog-api-key` header, never in the URL, so it cannot leak through logged URLs.
+- No OAuth: only public data is read.
 
-## QUOTAS / RATE LIMITS
+## DISCOVERY CAPABILITIES
 
-Budgets must live in `sources.daily_quota_budgets`, never in code. Starting values
-from the verified defaults:
+| Capability           | Implementation                                                             |
+| -------------------- | -------------------------------------------------------------------------- |
+| `discovery.trending` | `videos.list?chart=mostPopular` for every `regionCode` × `videoCategoryId` |
+| `discovery.url`      | `videos.list?id=` for any YouTube URL form (manual submissions)            |
+| `metrics.refresh`    | `videos:batchGetStats`, 50 ids per request                                 |
 
-```json
-{ "search.list": 100, "default": 10000, "videos.batchGetStats": 10000 }
-```
+SourceQuery params (`kind: "trending"`): `regionCode` (list or CSV, **required** — no
+default country), `videoCategoryId` (list, optional), `maxResults` (1–50, default 50),
+`pages` (1–10, default 1). Falls back to `SourceQuery.region` when `regionCode` is absent.
 
-Treat `search.list` as the scarcest resource. Actual allocations are visible in the
-Google Cloud Console → Quotas and may differ per project.
+**Short-form heuristic.** The only short-form signal used is **duration**, applied as the
+generic `--max-duration` filter _after_ normalization. Filtered videos are counted and
+sampled on the discovery run (`discovery_runs.stats.filteredSamples`), never silently dropped.
+The adapter does not label anything a "Short".
+
+## METRICS AVAILABLE
+
+| Metric   | Source field              | When absent                                  |
+| -------- | ------------------------- | -------------------------------------------- |
+| views    | `statistics.viewCount`    | `unavailable: unknown`                       |
+| likes    | `statistics.likeCount`    | `unavailable: unknown` (docs do not say why) |
+| comments | `statistics.commentCount` | `unavailable: unknown`                       |
+| shares   | —                         | `unavailable: not_provided_by_platform`      |
+
+## QUOTA / RATE LIMIT INFORMATION
+
+Default source budgets (`sources.daily_quota_budgets`, editable per source):
+`{"default": 10000, "videos.batchGetStats": 10000}`. One chart page = 1 `default` unit;
+one refresh of ≤50 videos = 1 `videos.batchGetStats` unit. Usage is written to `api_usage`
+per UTC day (YouTube resets quota at midnight Pacific time, so accounting is approximate
+at the day boundary). Errors `quotaExceeded`/`dailyLimitExceeded` → `quota_exceeded`;
+`rateLimitExceeded`/`userRateLimitExceeded` or HTTP 429 → `rate_limited`.
+
+## LIMITATIONS
+
+- **`mostPopular` is a weak funny-video signal now** (music/movies/gaming). Comedy (23) or
+  Pets & Animals (15) filters may return few or no videos in many regions.
+- `batchGetStats` publishes **no per-request id limit**; 50 is our conservative choice.
+- `failedVideoIds` gives no reason, so unreturned videos are `availability: unknown`.
+- Snippet has no `@handle`; creators are keyed by channel id with the channel title as display name.
+- **Views before and after 2026-08-24 are not comparable.** Use velocity between our own snapshots.
+- `search.list` (100 calls/day bucket) is not used in Phase 2.
 
 ## COMPLIANCE CONSIDERATIONS
 
-- Store metadata and links only; **never download video files**.
-- The Developer Policies contain data storage/refresh obligations for API data.
-  _Exact windows not verified this session_ — read the policy text and implement the
-  retention job before production use.
-- Because of the 2026-08-27 view-count change, **views before and after that date are
-  not comparable**. Scoring must use velocity between our own snapshots, not
-  historical absolute views.
+- Metadata and links only; **no video downloads**, no media URL extraction.
+- Raw API payloads are stored in `videos.raw_payload` for authoritative observations only.
+  The Developer Policies' data storage/refresh obligations were **not re-read this
+  session**; a retention job is required before production use.
+- One API project per client; never shard keys to gain quota.
 
 ## OPEN QUESTIONS
 
-1. **Where does "trending funny" come from now?** The `mostPopular` chart is
-   music/movies/gaming only, so the earlier plan (mostPopular × Comedy/Pets categories)
-   likely no longer works. Candidates: curated channel feeds, targeted `search.list`
-   within its 100-call budget, and links surfaced by other sources.
-2. Does `batchGetStats` accept 50+ ids per call, and which fields does it return?
-3. Exact data-retention/refresh windows in the current Developer Policies.
-4. Whether channel Atom feeds are covered by API Terms or by general site terms.
+1. Where do "trending funny" YouTube candidates come from now? Candidates: curated
+   channel feeds, a small `search.list` budget, and links surfaced by Bluesky and manual submissions.
+2. Actual per-request id limit of `batchGetStats`.
+3. Exact data retention/refresh windows in the current Developer Policies.
+4. Whether likes are omitted or zero when hidden by the creator.
