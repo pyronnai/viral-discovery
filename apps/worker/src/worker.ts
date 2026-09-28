@@ -38,9 +38,10 @@ export async function startWorker(deps: WorkerDeps): Promise<RunningWorker> {
   const health = await checkDatabase(dbHandle.db);
   if (!health.ok) {
     await dbHandle.close();
-    const reason = health.error
-      ? `database unreachable: ${health.error}`
-      : `schema incomplete (missing: ${health.missingTables.join(', ')}). Run "pnpm db:migrate".`;
+    const reason =
+      health.status === 'unmigrated'
+        ? `schema incomplete (missing: ${health.missingTables.join(', ')}). Run "pnpm db:migrate".`
+        : `database ${health.status === 'unreachable' ? 'unreachable' : 'check failed'}: ${health.error ?? 'unknown error'}`;
     throw new WorkerStartupError(reason);
   }
   logger.info(

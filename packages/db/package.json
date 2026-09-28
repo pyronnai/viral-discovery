@@ -10,7 +10,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx --env-file-if-exists=../../.env src/migrate.ts"
+    "db:migrate": "node --env-file-if-exists=../../.env --import tsx src/migrate.ts"
   },
   "dependencies": {
     "@vd/config": "workspace:^",

@@ -6,10 +6,20 @@ import { getTableName } from 'drizzle-orm';
 export const MIGRATIONS_SCHEMA = 'drizzle';
 export const MIGRATIONS_TABLE = '__drizzle_migrations';
 
+/**
+ * - unreachable: could not connect / run a trivial query (network, auth, …).
+ * - unmigrated:  connected, but application tables are missing (fresh DB → run migrations).
+ * - migrated:    connected and every application table is present.
+ * - error:       connected, but a later inspection query failed unexpectedly.
+ */
+export type DbHealthStatus = 'unreachable' | 'unmigrated' | 'migrated' | 'error';
+
 export interface DbHealth {
   ok: boolean;
+  status: DbHealthStatus;
   latencyMs: number;
   serverVersion: string | null;
+  /** null when the migrations table does not exist (no migration has ever run). */
   migrationsApplied: number | null;
   missingTables: string[];
   error?: string;
@@ -18,14 +28,30 @@ export interface DbHealth {
 /** Connectivity + migration status check. Never throws. */
 export async function checkDatabase(db: Database): Promise<DbHealth> {
   const started = performance.now();
+  const elapsed = () => Math.round(performance.now() - started);
+
+  let serverVersion: string | null;
   try {
     const version = await db.execute<{ server_version: string }>(sql`SHOW server_version`);
-    const latencyMs = Math.round(performance.now() - started);
+    serverVersion = version.rows[0]?.server_version ?? null;
+  } catch (err) {
+    return failure('unreachable', elapsed(), null, err);
+  }
+  const latencyMs = elapsed();
 
-    const migrations = await db.execute<{ count: string | null }>(sql`
-      SELECT CASE WHEN to_regclass(${`${MIGRATIONS_SCHEMA}.${MIGRATIONS_TABLE}`}) IS NULL
-        THEN NULL ELSE (SELECT count(*)::text FROM drizzle.__drizzle_migrations) END AS count`);
-    const countRaw = migrations.rows[0]?.count ?? null;
+  try {
+    // Postgres resolves every relation in a statement before running it, so the
+    // migrations table must be probed on its own before it is counted.
+    const probe = await db.execute<{ present: boolean }>(
+      sql`SELECT to_regclass(${`${MIGRATIONS_SCHEMA}.${MIGRATIONS_TABLE}`}) IS NOT NULL AS present`,
+    );
+    let migrationsApplied: number | null = null;
+    if (probe.rows[0]?.present) {
+      const counted = await db.execute<{ count: string }>(
+        sql`SELECT count(*)::text AS count FROM ${sql.identifier(MIGRATIONS_SCHEMA)}.${sql.identifier(MIGRATIONS_TABLE)}`,
+      );
+      migrationsApplied = Number(counted.rows[0]?.count ?? 0);
+    }
 
     const expected = Object.values(ALL_TABLES).map((t) => getTableName(t));
     const present = await db.execute<{ table_name: string }>(sql`
@@ -33,23 +59,35 @@ export async function checkDatabase(db: Database): Promise<DbHealth> {
     const presentSet = new Set(present.rows.map((r) => r.table_name));
     const missingTables = expected.filter((t) => !presentSet.has(t));
 
+    const ok = missingTables.length === 0;
     return {
-      ok: missingTables.length === 0,
+      ok,
+      status: ok ? 'migrated' : 'unmigrated',
       latencyMs,
-      serverVersion: version.rows[0]?.server_version ?? null,
-      migrationsApplied: countRaw === null ? null : Number(countRaw),
+      serverVersion,
+      migrationsApplied,
       missingTables,
     };
   } catch (err) {
-    return {
-      ok: false,
-      latencyMs: Math.round(performance.now() - started),
-      serverVersion: null,
-      migrationsApplied: null,
-      missingTables: [],
-      error: rootCauseMessage(err),
-    };
+    return failure('error', latencyMs, serverVersion, err);
   }
+}
+
+function failure(
+  status: 'unreachable' | 'error',
+  latencyMs: number,
+  serverVersion: string | null,
+  err: unknown,
+): DbHealth {
+  return {
+    ok: false,
+    status,
+    latencyMs,
+    serverVersion,
+    migrationsApplied: null,
+    missingTables: [],
+    error: rootCauseMessage(err),
+  };
 }
 
 /** Drizzle wraps driver errors ("Failed query: …"); report the underlying cause instead. */

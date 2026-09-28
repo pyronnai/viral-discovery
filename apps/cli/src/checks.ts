@@ -34,8 +34,11 @@ export async function checkDb(config: AppConfig): Promise<CheckResult[]> {
   });
   try {
     const health = await checkDatabase(handle.db);
-    if (health.error) {
-      return [{ name: 'database', status: 'fail', detail: `unreachable: ${health.error}` }];
+    if (health.status === 'unreachable' || health.status === 'error') {
+      const what = health.status === 'unreachable' ? 'unreachable' : 'check failed';
+      return [
+        { name: 'database', status: 'fail', detail: `${what}: ${health.error ?? 'unknown error'}` },
+      ];
     }
     const results: CheckResult[] = [
       {

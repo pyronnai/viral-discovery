@@ -38,8 +38,8 @@ export interface CreatorRef {
 
 /**
  * The contract every source adapter implements. Optional methods correspond 1:1
- * to capabilities; validateAdapter() enforces that declared capabilities and
- * implemented methods match exactly.
+ * to capabilities; checkAdapter() reports, and assertValidAdapter() rejects, any
+ * mismatch between declared capabilities and implemented methods.
  */
 export interface SourceAdapter {
   readonly manifest: AdapterManifest;
