@@ -4,9 +4,11 @@ Viral/funny short-form video **intelligence** agent: discover → normalize → 
 track engagement → score → categorize → human review. Links to and analyzes public
 metadata only; never downloads third-party media.
 
-**Status: Phase 2 — multi-source discovery v1.** Adapters for YouTube, Twitch, Bluesky,
-and manual URLs (incl. TikTok oEmbed) store normalized videos, cross-source sightings,
-and metric snapshots in PostgreSQL. No scoring, classification, or UI yet.
+**Status: Phase 3 — breakout discovery + virality scoring v1.** Adapters for YouTube
+(charts, targeted search, seed channels), Twitch, Bluesky (incl. TikTok short links), and
+manual URLs store normalized videos, cross-source sightings, and metric snapshots; a refresh
+ladder measures growth and a deterministic breakout score ranks candidates with an
+explained, confidence-labeled breakdown. No LLM classification or UI yet.
 See [`docs/architecture.md`](docs/architecture.md) and [`docs/sources/`](docs/sources/).
 
 ## Requirements
@@ -42,6 +44,22 @@ pnpm cli submit-url 'https://www.tiktok.com/@user/video/7412345678901234567'
 pnpm cli refresh-metrics youtube --limit 200         # append metric snapshots
 ```
 
+## Scheduled discovery, refresh ladder, and scoring
+
+```bash
+pnpm cli queries add youtube --kind search --param q="funny animals" \
+  --param publishedWithinHours=48 --param order=viewCount --cadence 360
+pnpm cli queries add youtube --kind channel_feed --param channelId=UC... --cadence 180
+pnpm cli queries add bluesky --kind search --param q=funny --param domain=tiktok.com --cadence 60
+pnpm cli queries list
+pnpm cli tick                          # due queries → due refreshes → rescore stale (cron this)
+pnpm cli refresh-metrics youtube --due --ladder 2h,8h,24h,72h
+pnpm cli rescore --explain             # stale only by default; --unscored / --recent 24 / --video <id>
+```
+
+Scores are `scored`, `provisional`, or `insufficient_evidence` (no value); see
+"Virality / breakout scoring v1" in [`docs/architecture.md`](docs/architecture.md).
+
 Every command accepts `--json` and exits non-zero on failure. Logs go to stderr.
 A video is stored once per `(platform, platform_video_id)` no matter which source saw it;
 each observation is a sighting (see "Source ≠ canonical platform" in the architecture doc).
@@ -69,7 +87,9 @@ packages/config              env validation (Zod) + logger (Pino)
 packages/core                domain types, metric model, job contracts
 packages/db                  Drizzle schema, migrations, health check
 packages/url-identity        URL → canonical (platform, video id, URL)
-packages/pipeline            platform-agnostic ingestion, submission, metric refresh
+packages/url-resolution      allowlisted TikTok short-link expansion (network)
+packages/scoring             pure, deterministic breakout score v1
+packages/pipeline            ingestion, submission, refresh ladder, scheduling, score lifecycle
 packages/adapters/contract   SourceAdapter contract, registry, HTTP helper, contract test kit
 packages/adapters/youtube    YouTube Data API v3 (mostPopular charts, batchGetStats)
 packages/adapters/twitch     Twitch Helix clips

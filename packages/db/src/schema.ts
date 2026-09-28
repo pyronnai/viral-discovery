@@ -34,6 +34,7 @@ import {
   DISCOVERY_RUN_TRIGGERS,
   REVIEW_STATUSES,
   RIGHTS_STATUSES,
+  SCORE_STATES,
   SOURCE_QUERY_KINDS,
   VIDEO_AVAILABILITIES,
   type ClassificationLabel,
@@ -49,6 +50,7 @@ export const discoveryRunStatusEnum = pgEnum('discovery_run_status', DISCOVERY_R
 export const discoveryRunTriggerEnum = pgEnum('discovery_run_trigger', DISCOVERY_RUN_TRIGGERS);
 export const sourceQueryKindEnum = pgEnum('source_query_kind', SOURCE_QUERY_KINDS);
 export const videoAvailabilityEnum = pgEnum('video_availability', VIDEO_AVAILABILITIES);
+export const scoreStateEnum = pgEnum('score_state', SCORE_STATES);
 
 const tz = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const createdAt = () => tz('created_at').notNull().defaultNow();
@@ -125,7 +127,11 @@ export const discoveryRuns = pgTable(
     stats: jsonb('stats').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
-  (t) => [index('discovery_runs_source_id_idx').on(t.sourceId)],
+  (t) => [
+    index('discovery_runs_source_id_idx').on(t.sourceId),
+    // "When did this query last run?" for cadence scheduling.
+    index('discovery_runs_query_created_idx').on(t.sourceQueryId, t.createdAt),
+  ],
 );
 
 // ── creators, clusters, videos ─────────────────────────────────────────────
@@ -266,15 +272,32 @@ export const scores = pgTable(
       .notNull()
       .references(() => videos.id, { onDelete: 'cascade' }),
     algorithmVersion: text('algorithm_version').notNull(),
-    value: doublePrecision('value').notNull(),
-    components: jsonb('components').$type<Record<string, number>>().notNull().default({}),
+    /** 0–100. NULL when state = insufficient_evidence — a score is never invented. */
+    value: doublePrecision('value'),
+    state: scoreStateEnum('state').notNull().default('scored'),
+    /** 0–1: how much evidence supports the value (snapshots, normalization, publish time). */
+    confidence: real('confidence').notNull().default(0),
+    /** Per-component availability, values, and explanation inputs. */
+    components: jsonb('components').$type<Record<string, unknown>>().notNull().default({}),
     missingMetrics: jsonb('missing_metrics').$type<MetricKey[]>().notNull().default([]),
+    /** Machine-readable explanation, e.g. ["VELOCITY_VERY_STRONG", "SINGLE_SNAPSHOT"]. */
+    reasonCodes: jsonb('reason_codes').$type<string[]>().notNull().default([]),
+    /** Hash of the evidence used; identical evidence is not re-stored (idempotent rescoring). */
+    inputsHash: text('inputs_hash'),
     basedOnSnapshotId: uuid('based_on_snapshot_id').references(() => metricSnapshots.id, {
       onDelete: 'set null',
     }),
     computedAt: tz('computed_at').notNull().defaultNow(),
   },
-  (t) => [index('scores_video_id_idx').on(t.videoId)],
+  (t) => [
+    index('scores_video_id_idx').on(t.videoId),
+    index('scores_video_version_computed_idx').on(t.videoId, t.algorithmVersion, t.computedAt),
+    check(
+      'scores_value_matches_state',
+      sql`(${t.state} = 'insufficient_evidence') = (${t.value} IS NULL)`,
+    ),
+    check('scores_confidence_range', sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`),
+  ],
 );
 
 // ── classification & review ───────────────────────────────────────────────

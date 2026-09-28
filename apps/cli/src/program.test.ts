@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildProgram } from './program.ts';
 import { checkConfig } from './checks.ts';
 import { exitCodeFor, type CommandIO } from './output.ts';
-import { collectParam } from './runtime.ts';
+import { collectParam, fail } from './runtime.ts';
 
 /** Captures output; DATABASE_URL points nowhere, so any DB access would fail loudly. */
 function harness(env: Record<string, string | undefined> = {}) {
@@ -29,10 +29,52 @@ describe('cli program', () => {
       'config-check',
       'db-check',
       'discover',
+      'discover-due',
       'health',
+      'queries',
       'refresh-metrics',
+      'rescore',
       'submit-url',
+      'tick',
     ]);
+  });
+});
+
+describe('phase 3 commands (validation before any database access)', () => {
+  it('rescore rejects conflicting scopes', async () => {
+    const h = harness();
+    await h.run('rescore', '--unscored', '--recent', '24', '--json');
+    expect(JSON.parse(h.out.join('\n'))).toMatchObject({
+      ok: false,
+      error: { message: 'choose one of --video, --unscored, --recent (default: stale)' },
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('queries add validates adapter and kind', async () => {
+    const h = harness();
+    await h.run('queries', 'add', 'nope', '--kind', 'search');
+    expect(h.err.join('\n')).toBe('✖ unknown adapter "nope"; see "vd adapters"');
+    const k = harness();
+    await k.run('queries', 'add', 'bluesky', '--kind', 'trending');
+    expect(k.err.join('\n')).toBe('✖ adapter "bluesky" does not support kind "trending"');
+  });
+
+  it('prints the root cause of a wrapped database error, not the SQL', () => {
+    const out: string[] = [];
+    const cause = new Error('relation "sources" does not exist');
+    fail(
+      { out: (l) => out.push(l), err: (l) => out.push(l) },
+      false,
+      new Error('Failed query: select … params: x', { cause }),
+    );
+    expect(out).toEqual(['✖ database error: relation "sources" does not exist']);
+  });
+
+  it('refresh-metrics rejects a malformed ladder', async () => {
+    const h = harness();
+    await h.run('refresh-metrics', 'youtube', '--due', '--ladder', '2h,soon');
+    expect(h.err.join('\n')).toMatch(/invalid ladder step "soon"/);
   });
 });
 

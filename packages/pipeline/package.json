@@ -14,8 +14,10 @@
     "@vd/config": "workspace:^",
     "@vd/core": "workspace:^",
     "@vd/db": "workspace:^",
+    "@vd/scoring": "workspace:^",
     "@vd/url-identity": "workspace:^",
-    "drizzle-orm": "^0.45.3"
+    "drizzle-orm": "^0.45.3",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

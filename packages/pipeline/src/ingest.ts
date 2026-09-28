@@ -37,6 +37,11 @@ export interface PipelineDeps {
   logger: Logger;
   now?: () => Date;
   signal?: AbortSignal;
+  /**
+   * adapter id → platform for every known adapter, including unconfigured ones
+   * (whose sources may still have sightings). Falls back to the registry.
+   */
+  adapterPlatforms?: Record<string, string>;
 }
 
 /** Platform-agnostic filters applied to normalized videos, never to raw payloads. */
@@ -153,12 +158,14 @@ async function runItems(
       trigger: args.trigger,
       status: 'running',
       startedAt: now(),
+      // The pipeline clock, not the DB clock: cadence scheduling compares against it.
+      createdAt: now(),
       request: args.request,
     })
     .returning({ id: schema.discoveryRuns.id });
   if (!run) throw new PipelineError('could not create discovery run');
 
-  const quota = await loadQuotaBudget(db, source, now());
+  const quota = await loadQuotaBudget(db, source, now(), adapter.manifest);
   const ctx = adapterContext(deps, adapter, quota);
   const stats: RunStats = {
     ingested: 0,

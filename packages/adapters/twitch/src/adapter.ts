@@ -285,6 +285,9 @@ export function createTwitchAdapter(options: TwitchAdapterOptions): SourceAdapte
     },
 
     async *discoverFeed(req, ctx) {
+      if (req.kind !== 'channel_feed') {
+        throw new Error(`twitch feeds support kind "channel_feed" only, not "${req.kind}"`);
+      }
       const params = parseParams(TWITCH_ADAPTER_ID, ClipParamsSchema, req.params);
       if (!params.broadcasterId) {
         throw new Error('twitch "channel_feed" discovery needs params.broadcasterId');

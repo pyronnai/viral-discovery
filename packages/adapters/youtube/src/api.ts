@@ -71,3 +71,42 @@ export const GoogleErrorBody = z.object({
     errors: z.array(z.object({ reason: z.string().optional() })).optional(),
   }),
 });
+
+/** search.list with type=video: only ids are read; metadata comes from videos.list. */
+export const SearchListResponse = z.object({
+  items: z.array(z.object({ id: z.object({ videoId: z.string().min(1).optional() }).optional() })),
+  nextPageToken: z.string().optional(),
+});
+
+/** channels.list part=contentDetails. */
+export const ChannelListResponse = z.object({
+  items: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        contentDetails: z
+          .object({
+            relatedPlaylists: z.object({ uploads: z.string().min(1).optional() }).optional(),
+          })
+          .optional(),
+      }),
+    )
+    .default([]),
+});
+
+/** playlistItems.list part=contentDetails. */
+export const PlaylistItemsResponse = z.object({
+  items: z
+    .array(
+      z.object({
+        contentDetails: z
+          .object({
+            videoId: z.string().min(1).optional(),
+            videoPublishedAt: z.iso.datetime({ offset: true }).optional(),
+          })
+          .optional(),
+      }),
+    )
+    .default([]),
+  nextPageToken: z.string().optional(),
+});

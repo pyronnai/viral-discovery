@@ -17,3 +17,25 @@ export {
 export { refreshMetrics, type RefreshOptions, type RefreshSummary } from './refresh.ts';
 export { PipelineError, ensureSource } from './sources.ts';
 export { readingsToColumns } from './persist.ts';
+export {
+  refreshDue,
+  ladderStatus,
+  parseLadder,
+  resolvePolicy,
+  RefreshPolicySchema,
+  DEFAULT_REFRESH_POLICY,
+  type RefreshPolicy,
+  type DueSummary,
+} from './refresh-policy.ts';
+export {
+  scoreVideo,
+  rescore,
+  selectForScoring,
+  loadScoringInput,
+  loadPopulation,
+  type RescoreOptions,
+  type RescoreScope,
+  type RescoreSummary,
+  type ScoreVideoResult,
+} from './score.ts';
+export { dueQueries, runDueQueries, type DueQuery } from './schedule.ts';

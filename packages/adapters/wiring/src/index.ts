@@ -32,11 +32,17 @@ export interface AdapterStatus {
 export interface WiredAdapters {
   registry: AdapterRegistry;
   statuses: AdapterStatus[];
+  /** adapter id → platform for every known adapter, configured or not. */
+  platforms: Record<string, string>;
 }
 
 type AdapterConfig = Pick<
   AppConfig,
-  'YOUTUBE_API_KEY' | 'TWITCH_CLIENT_ID' | 'TWITCH_CLIENT_SECRET' | 'BLUESKY_APPVIEW_URL'
+  | 'YOUTUBE_API_KEY'
+  | 'YOUTUBE_STATS_BATCH_SIZE'
+  | 'TWITCH_CLIENT_ID'
+  | 'TWITCH_CLIENT_SECRET'
+  | 'BLUESKY_APPVIEW_URL'
 >;
 
 interface Definition {
@@ -48,7 +54,11 @@ const DEFINITIONS: readonly Definition[] = [
   {
     manifest: youtubeManifest,
     create: (c, fetch) =>
-      createYouTubeAdapter({ apiKey: c.YOUTUBE_API_KEY ?? '', ...(fetch ? { fetch } : {}) }),
+      createYouTubeAdapter({
+        apiKey: c.YOUTUBE_API_KEY ?? '',
+        ...(c.YOUTUBE_STATS_BATCH_SIZE ? { statsBatchSize: c.YOUTUBE_STATS_BATCH_SIZE } : {}),
+        ...(fetch ? { fetch } : {}),
+      }),
   },
   {
     manifest: twitchManifest,
@@ -105,7 +115,11 @@ export function buildAdapterRegistry(
       docsPath: manifest.docsPath,
     });
   }
-  return { registry, statuses };
+  return {
+    registry,
+    statuses,
+    platforms: Object.fromEntries(statuses.map((s) => [s.id, s.platform])),
+  };
 }
 
 /** A helpful message for an adapter that exists but is not configured, or undefined. */

@@ -9,6 +9,7 @@ import type {
   PlatformId,
   ReviewStatus,
   RightsStatus,
+  ScoreState,
   SourceQueryKind,
   VideoAvailability,
 } from './enums.ts';
@@ -129,8 +130,14 @@ export interface Score {
   videoId: Uuid;
   /** Scoring algorithm version, so scores from different formulas are never compared blindly. */
   algorithmVersion: string;
-  value: number;
-  components: Record<string, number>;
+  /** 0–100, or null when state is insufficient_evidence. */
+  value: number | null;
+  state: ScoreState;
+  /** 0–1 evidence quality. */
+  confidence: number;
+  /** Per-component breakdown (availability, value, explanation inputs). */
+  components: Record<string, unknown>;
+  reasonCodes: string[];
   /** Which metrics were missing when this score was computed. */
   missingMetrics: MetricKey[];
   computedAt: Date;

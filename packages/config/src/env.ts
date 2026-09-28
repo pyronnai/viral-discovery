@@ -26,6 +26,8 @@ export const EnvSchema = z.object({
 
   // ── source adapters (all optional; see docs/sources/*.md) ─────────────────
   YOUTUBE_API_KEY: z.string().min(1).optional(),
+  /** Application batch size for videos:batchGetStats (YouTube documents no maximum). */
+  YOUTUBE_STATS_BATCH_SIZE: z.coerce.number().int().min(1).max(1_000).optional(),
   TWITCH_CLIENT_ID: z.string().min(1).optional(),
   TWITCH_CLIENT_SECRET: z.string().min(1).optional(),
   /** Unauthenticated Bluesky AppView host. Defaults to https://api.bsky.app. */

@@ -70,3 +70,13 @@ export type SourceQueryKind = z.infer<typeof SourceQueryKindSchema>;
 export const VIDEO_AVAILABILITIES = ['available', 'removed', 'private', 'unknown'] as const;
 export const VideoAvailabilitySchema = z.enum(VIDEO_AVAILABILITIES);
 export type VideoAvailability = z.infer<typeof VideoAvailabilitySchema>;
+
+/**
+ * How much evidence stands behind a virality score.
+ * - scored:                growth measured between canonical snapshots.
+ * - provisional:           canonical metrics exist, but growth cannot be measured yet.
+ * - insufficient_evidence: no canonical metrics at all (e.g. a TikTok submission); no score value.
+ */
+export const SCORE_STATES = ['scored', 'provisional', 'insufficient_evidence'] as const;
+export const ScoreStateSchema = z.enum(SCORE_STATES);
+export type ScoreState = z.infer<typeof ScoreStateSchema>;

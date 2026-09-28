@@ -1,0 +1,26 @@
+{
+  "kind": "youtube#playlistItemListResponse",
+  "etag": "fixture-etag-playlist",
+  "nextPageToken": "EAAaBlBUOkNBVQ",
+  "pageInfo": { "totalResults": 812, "resultsPerPage": 3 },
+  "items": [
+    {
+      "kind": "youtube#playlistItem",
+      "etag": "p1",
+      "id": "UExfixture1",
+      "contentDetails": { "videoId": "vdFixture04", "videoPublishedAt": "2026-09-28T01:30:00Z" }
+    },
+    {
+      "kind": "youtube#playlistItem",
+      "etag": "p2",
+      "id": "UExfixture2",
+      "contentDetails": { "videoId": "vdFixture01", "videoPublishedAt": "2026-09-27T14:03:11Z" }
+    },
+    {
+      "kind": "youtube#playlistItem",
+      "etag": "p3",
+      "id": "UExfixture3",
+      "contentDetails": { "videoId": "vdFixtureOl", "videoPublishedAt": "2025-01-01T00:00:00Z" }
+    }
+  ]
+}

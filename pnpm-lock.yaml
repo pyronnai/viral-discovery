@@ -59,6 +59,9 @@ importers:
       '@vd/pipeline':
         specifier: workspace:^
         version: link:../../packages/pipeline
+      '@vd/scoring':
+        specifier: workspace:^
+        version: link:../../packages/scoring
       '@vd/url-identity':
         specifier: workspace:^
         version: link:../../packages/url-identity
@@ -93,6 +96,12 @@ importers:
       '@vd/db':
         specifier: workspace:^
         version: link:../../packages/db
+      '@vd/pipeline':
+        specifier: workspace:^
+        version: link:../../packages/pipeline
+      '@vd/scoring':
+        specifier: workspace:^
+        version: link:../../packages/scoring
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0)
@@ -299,12 +308,18 @@ importers:
       '@vd/db':
         specifier: workspace:^
         version: link:../db
+      '@vd/scoring':
+        specifier: workspace:^
+        version: link:../scoring
       '@vd/url-identity':
         specifier: workspace:^
         version: link:../url-identity
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0)
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@electric-sql/pglite':
         specifier: ^0.5.8
@@ -324,6 +339,16 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/scoring:
+    dependencies:
+      '@vd/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
       vitest:
         specifier: ^5.0.2
         version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))

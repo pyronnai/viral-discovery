@@ -1,6 +1,6 @@
 # Architecture
 
-_Status: Phase 2 (multi-source discovery v1). Last updated 2026-09-28._
+_Status: Phase 3 (breakout discovery + virality scoring v1). Last updated 2026-09-29._
 
 ## Purpose
 
@@ -19,34 +19,35 @@ re-host third-party media, and it does not depend on any generative-video tool.
           review ◄─ classification ◄─ scoring ◄─ metric snapshots ◄──┘
 ```
 
-| Stage                | Responsibility                                                                                                                                                                               | Status (Phase 2)                                                       |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| **Source adapters**  | Talk to one platform via an approved access method; yield `RawItem`s.                                                                                                                        | YouTube, Twitch, Bluesky, manual URL (+TikTok oEmbed). Reddit planned. |
-| **Ingestion**        | Run a `SourceQuery` through its adapter, record a `DiscoveryRun`, persist `Sighting`s, account quota in `api_usage`.                                                                         | `@vd/pipeline` `runDiscovery` / `runSourceQuery`, via CLI.             |
-| **Normalization**    | `adapter.normalize(raw)` → `NormalizedVideo`, validated by `safeNormalize()` at the boundary. Invalid items are quarantined (counted + sampled on the run), never silently dropped.          | Implemented.                                                           |
-| **Identity**         | Map URLs/ids to the canonical `(platform, platform_video_id)` + canonical URL.                                                                                                               | `@vd/url-identity` (pure) + `@vd/url-resolution` (TikTok short links). |
-| **Enrichment**       | Fill a referenced video from its canonical platform's adapter (`discovery.url`).                                                                                                             | For `submit-url` only. `creator.enrich` not implemented.               |
-| **Deduplication**    | Exact: `(platform, platform_video_id)` unique. Near-duplicate: cluster by thumbnail hash + duration + title similarity into `clusters`. Review status is per cluster, so reposts inherit it. | Exact dedupe implemented. Clustering not implemented.                  |
-| **Metric snapshots** | Time series of engagement readings. Every metric is explicitly a value or unavailable-with-reason.                                                                                           | Initial snapshot on ingest + `refresh-metrics`.                        |
-| **Scoring**          | Velocity/engagement/outlier/freshness score, per-platform normalized, **versioned** (`scores.algorithm_version`).                                                                            | Table only. **Not implemented** (next phase).                          |
-| **Classification**   | Multi-label categories + safety flags, **versioned** by taxonomy, model, and prompt.                                                                                                         | Table only. Not implemented.                                           |
-| **Review**           | Human decisions (`approved`, `rejected`, `saved`, `already_used`) as an append-only event log per cluster.                                                                                   | Table. No UI.                                                          |
+| Stage                | Responsibility                                                                                                                                                                               | Status (Phase 2)                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **Source adapters**  | Talk to one platform via an approved access method; yield `RawItem`s.                                                                                                                        | YouTube, Twitch, Bluesky, manual URL (+TikTok oEmbed). Reddit planned.         |
+| **Ingestion**        | Run a `SourceQuery` through its adapter, record a `DiscoveryRun`, persist `Sighting`s, account quota in `api_usage`.                                                                         | `@vd/pipeline` `runDiscovery` / `runSourceQuery`, via CLI.                     |
+| **Normalization**    | `adapter.normalize(raw)` → `NormalizedVideo`, validated by `safeNormalize()` at the boundary. Invalid items are quarantined (counted + sampled on the run), never silently dropped.          | Implemented.                                                                   |
+| **Identity**         | Map URLs/ids to the canonical `(platform, platform_video_id)` + canonical URL.                                                                                                               | `@vd/url-identity` (pure) + `@vd/url-resolution` (TikTok short links).         |
+| **Enrichment**       | Fill a referenced video from its canonical platform's adapter (`discovery.url`).                                                                                                             | For `submit-url` only. `creator.enrich` not implemented.                       |
+| **Deduplication**    | Exact: `(platform, platform_video_id)` unique. Near-duplicate: cluster by thumbnail hash + duration + title similarity into `clusters`. Review status is per cluster, so reposts inherit it. | Exact dedupe implemented. Clustering not implemented.                          |
+| **Metric snapshots** | Time series of engagement readings. Every metric is explicitly a value or unavailable-with-reason.                                                                                           | Initial snapshot on ingest + refresh ladder (`refresh-metrics --due`, `tick`). |
+| **Scoring**          | Velocity/engagement/outlier/freshness score, per-platform normalized, **versioned** (`scores.algorithm_version`).                                                                            | `@vd/scoring` breakout-v1 + `rescore` / `score-video` job.                     |
+| **Classification**   | Multi-label categories + safety flags, **versioned** by taxonomy, model, and prompt.                                                                                                         | Table only. Not implemented.                                                   |
+| **Review**           | Human decisions (`approved`, `rejected`, `saved`, `already_used`) as an append-only event log per cluster.                                                                                   | Table. No UI.                                                                  |
 
 ## Packages
 
-| Package                | Role                                                                                                             | Depends on             |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `@vd/config`           | Zod-validated env (adapter credentials optional), Pino logger factory.                                           | —                      |
-| `@vd/core`             | Storage-agnostic domain types, enums, metric model, job contracts.                                               | —                      |
-| `@vd/url-identity`     | Pure URL → canonical identity for YouTube, TikTok, Twitch clips. No network, never guesses.                      | —                      |
-| `@vd/url-resolution`   | Network step above it: allowlisted, bounded expansion of TikTok short links (no generic redirect following).     | url-identity           |
-| `@vd/adapter-contract` | `SourceAdapter` interface, manifest, normalized schemas, quota budget, registry, HTTP helper, contract test kit. | core, config           |
-| `@vd/adapter-*`        | `youtube`, `twitch`, `bluesky`, `manual-url`: one platform/access method each.                                   | contract, url-identity |
-| `@vd/adapter-wiring`   | **The only place adapters are instantiated**; registers each one only if its own env vars are set.               | adapters               |
-| `@vd/db`               | Drizzle schema, client, migrations, health check.                                                                | core, config           |
-| `@vd/pipeline`         | Platform-agnostic ingestion: normalize → identity → creator/video upsert → sighting → snapshot → run stats.      | contract, db           |
-| `@vd/worker` (app)     | pg-boss runtime: queues, handler registration.                                                                   | wiring, db             |
-| `@vd/cli` (app)        | `health`, `config-check`, `db-check`, `adapters`, `discover`, `submit-url`, `refresh-metrics`.                   | wiring, pipeline       |
+| Package                | Role                                                                                                                | Depends on             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `@vd/config`           | Zod-validated env (adapter credentials optional), Pino logger factory.                                              | —                      |
+| `@vd/core`             | Storage-agnostic domain types, enums, metric model, job contracts.                                                  | —                      |
+| `@vd/url-identity`     | Pure URL → canonical identity for YouTube, TikTok, Twitch clips. No network, never guesses.                         | —                      |
+| `@vd/url-resolution`   | Network step above it: allowlisted, bounded expansion of TikTok short links (no generic redirect following).        | url-identity           |
+| `@vd/scoring`          | Pure, deterministic breakout score v1 (components, confidence, explanation, evidence fingerprint). No DB, no clock. | core                   |
+| `@vd/adapter-contract` | `SourceAdapter` interface, manifest, normalized schemas, quota budget, registry, HTTP helper, contract test kit.    | core, config           |
+| `@vd/adapter-*`        | `youtube`, `twitch`, `bluesky`, `manual-url`: one platform/access method each.                                      | contract, url-identity |
+| `@vd/adapter-wiring`   | **The only place adapters are instantiated**; registers each one only if its own env vars are set.                  | adapters               |
+| `@vd/db`               | Drizzle schema, client, migrations, health check.                                                                   | core, config           |
+| `@vd/pipeline`         | Platform-agnostic ingestion: normalize → identity → creator/video upsert → sighting → snapshot → run stats.         | contract, db           |
+| `@vd/worker` (app)     | pg-boss runtime: queues, handler registration.                                                                      | wiring, db             |
+| `@vd/cli` (app)        | `health`, `config-check`, `db-check`, `adapters`, `discover`, `submit-url`, `refresh-metrics`.                      | wiring, pipeline       |
 
 Rule: **core and the pipeline never import an adapter, and nothing but
 `@vd/adapter-wiring` instantiates adapters** (the worker and CLI both call it). Adding
@@ -152,6 +153,137 @@ Metrics are never faked. Each reading is either `{kind: 'value'}` or
 rejects an adapter that reports a value for a metric its manifest doesn't declare.
 Scores record `missing_metrics` so scoring can down-weight rather than guess.
 
+## Candidate discovery strategies (Phase 3)
+
+Discovery is **configuration, not code**: `source_queries` rows (kind, params, region,
+`cadence_minutes`, enabled) managed with `vd queries add|list|enable|disable`. The existing
+model is sufficient for every source — no new query table was needed:
+
+| Query                   | Adapter | kind           | Example params                                                       |
+| ----------------------- | ------- | -------------- | -------------------------------------------------------------------- |
+| YouTube chart           | youtube | `trending`     | `regionCode: ["US","GB"]`, `videoCategoryId`                         |
+| YouTube targeted search | youtube | `search`       | `q: "funny animals"`, `publishedWithinHours: 48`, `order: viewCount` |
+| YouTube seed channels   | youtube | `channel_feed` | `channelId: [...]` / `handle` / `uploadsPlaylistId`, `maxPerChannel` |
+| Twitch game clips       | twitch  | `trending`     | `gameId`, `lookbackHours`                                            |
+| Twitch broadcaster      | twitch  | `channel_feed` | `broadcasterId`                                                      |
+| Bluesky search          | bluesky | `search`       | `q`, `domain: "tiktok.com"`, `tag`                                   |
+
+Search themes (funny, fails, animals, reaction, …) are one query each, so each has its own
+cadence and cost; nothing is hard-coded in adapters. `discover-due` runs enabled queries
+whose cadence elapsed (`discovery_runs.created_at` uses the pipeline clock).
+Note: `channel_feed` and `community_feed` share the `discovery.feed` capability; adapters
+reject the kind they do not serve.
+
+### YouTube search quota strategy
+
+- **API fact (2026-09-29):** `search.list` costs 1 unit in its own _Search Queries_ bucket,
+  **100 calls/day** by default; `videos.list`, `channels.list`, `playlistItems.list` cost
+  1 unit each from the default 10,000-unit bucket; `videoDuration=short` means **< 4 minutes**
+  (it is not a Shorts detector).
+- **Application choices:** one search page = 1 `search.list` call + 1 `videos.list` call for
+  metadata/stats. The source budget for `search.list` defaults to the manifest's 100; a
+  source row that predates the bucket still gets the manifest default (never "unlimited").
+  With e.g. 10 themes × every 6 h × 1 page = 40 calls/day, well under 100. Seed channels
+  cost no search quota (`channels.list` once per run + `playlistItems.list` per channel +
+  `videos.list` per 50 uploads), and a `publishedWithinHours` window skips old uploads
+  before spending `videos.list` quota.
+
+### TikTok short links
+
+See `docs/sources/tiktok.md`. `@vd/url-identity` stays pure; `@vd/url-resolution` expands
+allowlisted TikTok short links with bounded HEAD redirects and never fetches video pages.
+
+## Metric refresh lifecycle
+
+- **T0** = a video's first canonical snapshot (or first discovery if it has none, e.g. a
+  YouTube video first seen via Bluesky).
+- **Ladder** (default, configurable): T0 + 2 h, 8 h, 24 h, 72 h. A step is satisfied by any
+  snapshot at ≥ step × (1 − tolerance 0.2). Missed steps collapse into the latest one (one
+  refresh, not a backlog). After the last step + 6 h grace the video **ages out**.
+- **Configuration:** `sources.config.refreshPolicy` of the refreshing source
+  (`{ladderMinutes, tolerance, graceMinutes}`), overridable with `--ladder 2h,8h,24h,72h`.
+- **Bulk:** due videos are refreshed together through the adapter's bulk method (YouTube
+  `videos:batchGetStats` in application batches of `YOUTUBE_STATS_BATCH_SIZE`, default 50 —
+  **YouTube documents no maximum**; Twitch Get Clips ≤ 100 ids; Bluesky `getPosts` ≤ 25).
+- Platforms without canonical metrics (TikTok via oEmbed) are never refreshed; nothing is fabricated.
+
+## Virality / breakout scoring v1 (`breakout-v1`)
+
+Goal: _which candidates are breaking out unusually fast for their age and context_ — not
+"most total views". Pure and deterministic (`@vd/scoring`), no LLM, no clock inside.
+
+```
+score = 100 × weightedMean(available components) × (0.5 + 0.5 × confidence)
+```
+
+Only **available** components enter the mean (weights renormalized), so a platform is never
+punished for a metric it does not expose. Low evidence dampens the score.
+
+| Component         | Weight | Basis              | Definition (all values 0–1)                                                                                                                                                                                                        |
+| ----------------- | ------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| velocity          | 0.30   | canonical          | growth metric (views, else likes) between the latest snapshot and the latest one ≥ 30 min earlier: 0.6 × absolute (log10(1+Δ/h), platform percentile or fallback scale) + 0.4 × relative (Δ ÷ previous count per hour; 50 %/h → 1) |
+| acceleration      | 0.10   | canonical          | needs 3 spaced snapshots: later ÷ earlier velocity, 0.5 + log2(ratio)/4 (×4 → 1, flat → 0.5, ×¼ → 0)                                                                                                                               |
+| engagement        | 0.15   | canonical          | mean over **supplied** likes/comments/shares ÷ views (≥ 100 views), percentile or reference (5 % / 0.5 % / 0.5 %)                                                                                                                  |
+| freshness         | 0.15   | canonical          | 0.5^(age h / 36); age from `published_at`, else `first_discovered_at` (flagged, lower confidence)                                                                                                                                  |
+| crossSource       | 0.10   | discovery          | 0.6 × min(1, (distinct sources − 1)/2) + 0.4 × min(1, log2(independent observations)/4)                                                                                                                                            |
+| sourcePropagation | 0.10   | source_propagation | log10(1 + Σ likes+reposts+replies+quotes of discovery-source items) / log10(1001); latest observation per item                                                                                                                     |
+| creatorOutlier    | 0.10   | canonical          | log10(current ÷ creator median) / log10(20); needs ≥ 5 other videos by the creator                                                                                                                                                 |
+
+### Missing-data behavior
+
+- Missing metrics are `unavailable` with a reason, never zero. `missing_metrics` is stored.
+- No views → likes become the growth metric (`NO_VIEW_METRIC`), engagement unavailable.
+- One snapshot → no velocity (`SINGLE_SNAPSHOT`); snapshots < 30 min apart → `SNAPSHOTS_TOO_CLOSE`.
+- < 3 spaced snapshots → no acceleration. Decreasing counts → Δ = 0 (`METRIC_DECREASED`).
+- Creator baseline with < 5 other videos → unavailable (`CREATOR_BASELINE_UNAVAILABLE`); it
+  strengthens automatically as the dataset grows.
+
+### Confidence states
+
+| State                   | When                                               | `value`                      |
+| ----------------------- | -------------------------------------------------- | ---------------------------- |
+| `scored`                | velocity measured (≥ 2 spaced canonical snapshots) | 0–100                        |
+| `provisional`           | canonical metrics exist, velocity not yet          | 0–100, dampened              |
+| `insufficient_evidence` | no canonical metrics (e.g. manual TikTok)          | **NULL** (DB check enforces) |
+
+Confidence (0–1): 0.3 provisional / 0.6 velocity / 0.75 + acceleration; +0.1 platform-percentile
+velocity; +0.05 real publish time; +0.05 engagement available; +0.05 ≥ 2 sources. Insufficient: 0.
+Components are still computed and stored for insufficient-evidence candidates (e.g. "seen in
+5 Bluesky posts") so a review feed can show them honestly.
+
+### Platform normalization
+
+Velocity (log growth/hour, per growth metric) and engagement ratios are converted to a
+**mid-rank percentile within the platform** over the latest `breakout-v1` score of every other
+video on that platform in the last 14 days — once that sample has ≥ 30 values. Below that,
+a documented **absolute fallback scale** is used, the component is labeled
+`normalization: absolute_fallback`, `VELOCITY_NORMALIZATION_FALLBACK` is emitted, and confidence
+is 0.1 lower. Raw counts are never compared across platforms.
+
+### Canonical metrics vs source-context engagement
+
+- Canonical metrics come only from the video's own platform (metric snapshots).
+- A discovery source's own engagement (Bluesky post likes/reposts/replies/quotes, stored as
+  `sightings.context.postEngagement`) feeds **only** `sourcePropagation`, basis
+  `source_propagation`, and only from sightings whose source platform differs from the video's
+  (a native Bluesky video's post _is_ the video — no double counting).
+- Cross-source counts **independent observations** = distinct (source, observation key), so
+  repeat runs and duplicate sightings in a run cannot inflate it.
+
+### Score lifecycle
+
+- `scores` rows: `value`, `state`, `confidence`, `components` (per-component availability,
+  value, strength, basis, normalization, details), `missing_metrics`, `reason_codes`,
+  `algorithm_version`, `inputs_hash`, `based_on_snapshot_id`, `computed_at` (= asOf).
+- **Eligibility:** `rescore` (default scope `stale`) selects videos with no score for the
+  current version, or with a snapshot/sighting newer than their latest score. Other scopes:
+  `--unscored`, `--recent <h>`, `--video <ids>`, `--platform`.
+- **Idempotent:** the evidence fingerprint (config + snapshots + sightings + creator history,
+  excluding clock and population) is compared with the latest score; identical evidence
+  stores nothing. Scoring ignores evidence after `asOf`, so recalculation is reproducible.
+- **Versioning:** every tunable lives in `ScoringConfig`; changing one requires a new
+  `version`. Scores of different versions are never mixed in populations.
+
 ## Content origin vs rights
 
 Two separate concepts, deliberately:
@@ -168,14 +300,19 @@ Discovery never implies permission. Any future reuse feature must check `rights`
 
 ## Jobs and scheduling
 
-pg-boss (in its own schema in the same Postgres). The worker idempotently creates
-the five pipeline queues on boot — `discover-source`, `normalize-item`,
-`refresh-metrics`, `score-video`, `classify-cluster` — and still registers **no handlers**:
-Phase 2 runs discovery from the CLI. Wiring `discover-source` / `refresh-metrics`
-handlers to `@vd/pipeline` is a small follow-up. Payloads are validated with the Zod schemas in `@vd/core` before any
-handler runs. No schedules are created. The worker starts cleanly with zero
-adapters, zero sources, and zero schedules, and warns about enabled sources whose
-adapter isn't registered.
+pg-boss (in its own schema in the same Postgres). The worker idempotently creates the
+five queues on boot and, since Phase 3, registers handlers for three of them:
+
+| Job               | Handler                                        | Idempotency                                              |
+| ----------------- | ---------------------------------------------- | -------------------------------------------------------- |
+| `discover-source` | `runSourceQuery` for the stored query          | videos upsert; sightings unique per run                  |
+| `refresh-metrics` | `refreshMetrics` grouped by canonical platform | snapshots unique per (video, captured_at)                |
+| `score-video`     | `scoreVideo` (current algorithm only)          | a row is stored only if the evidence fingerprint changed |
+
+`normalize-item` and `classify-cluster` stay handler-less. The worker still creates **no
+pg-boss schedules**: `pnpm cli tick` (cron-friendly) runs one pass of
+`discover-due` → `refresh-metrics --due` (every platform with a `metrics.refresh`
+adapter) → `rescore` (stale only).
 
 ## Data retention (design constraint, not yet implemented)
 
@@ -210,7 +347,7 @@ Downloading/ripping third-party video · extracting media URLs (e.g. Bluesky HLS
 playlists are never stored) · bypassing auth, anti-bot, DRM, paywalls · unofficial
 scraping (TikTok pages, Reddit, `bsky.app` HTML) · following TikTok short-link redirects ·
 publishing (later phase, separate service) · any specific AI-generation provider ·
-scoring and classification (next phase).
+LLM classification, dashboard, compilation planning (later phases).
 
 ## Decisions (Phase 1)
 
@@ -239,3 +376,16 @@ scoring and classification (next phase).
    real migrations, so dedupe/upsert semantics are tested on Postgres without a server.
 8. **Fixtures are synthetic** but shaped exactly like the documented responses (no
    credentials were available to record YouTube/Twitch). Live tests exist behind `LIVE_API_TESTS=1`.
+
+## Decisions (Phase 3)
+
+1. **TikTok short links** are expanded by a separate network layer with a host allowlist and
+   bounded HEAD redirects; the identity package stays pure.
+2. **YouTube discovery = chart + targeted search + seed channels**, all as SourceQuery data.
+3. **Refresh ladder** from T0 with tolerance and age-out; bulk refresh per platform.
+4. **Breakout score v1** is a renormalized weighted mean of available components with
+   evidence dampening; three explicit states; NULL value without canonical evidence.
+5. **Source propagation is its own component**, never merged into canonical engagement.
+6. **Percentile normalization per platform** only with ≥ 30 samples; otherwise a labeled fallback.
+7. **Idempotent scoring** via evidence fingerprints; the worker handles `discover-source`,
+   `refresh-metrics`, `score-video`; `tick` is the cron entry point (no pg-boss schedules yet).

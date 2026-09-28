@@ -22,7 +22,7 @@ export interface RefreshSummary {
   quotaUsed: Record<string, number>;
 }
 
-function refreshAdapter(deps: PipelineDeps, platform: string): SourceAdapter {
+export function refreshAdapter(deps: PipelineDeps, platform: string): SourceAdapter {
   const adapter = deps.registry
     .list()
     .find(
@@ -75,7 +75,7 @@ export async function refreshMetrics(
   };
   if (rows.length === 0 || !adapter.refreshMetrics) return summary;
 
-  const quota = await loadQuotaBudget(deps.db, source, now());
+  const quota = await loadQuotaBudget(deps.db, source, now(), adapter.manifest);
   try {
     const results = await adapter.refreshMetrics(
       rows.map((r) => ({ platformVideoId: r.platformVideoId, canonicalUrl: r.canonicalUrl })),

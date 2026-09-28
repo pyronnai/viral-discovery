@@ -18,6 +18,9 @@ import page2 from '../fixtures/videos-list-page2.json' with { type: 'json' };
 import empty from '../fixtures/videos-list-empty.json' with { type: 'json' };
 import batchStats from '../fixtures/batchGetStats.json' with { type: 'json' };
 import quotaError from '../fixtures/error-quota-exceeded.json' with { type: 'json' };
+import searchList from '../fixtures/search-list.json' with { type: 'json' };
+import channels from '../fixtures/channels-contentDetails.json' with { type: 'json' };
+import uploads from '../fixtures/playlistItems-uploads.json' with { type: 'json' };
 import { createYouTubeAdapter } from './adapter.ts';
 import { parseIsoDurationMs } from './duration.ts';
 
@@ -331,5 +334,193 @@ describe('youtube refreshMetrics (videos:batchGetStats)', () => {
       50, 50, 20,
     ]);
     expect(results).toHaveLength(120);
+  });
+});
+
+describe('youtube discoverSearch (search.list → videos.list)', () => {
+  const byIds = (u: URL) => u.searchParams.has('id');
+  const videosResponse = { items: [mostPopular.items[0], page2.items[0]] };
+
+  it('sends the configured search and spends one search.list unit per page', async () => {
+    const fetch = createFakeFetch([
+      route('/youtube/v3/search', { body: { ...searchList, nextPageToken: undefined } }),
+      route('/youtube/v3/videos', { body: videosResponse }, byIds),
+    ]);
+    const ctx = testAdapterContext();
+    const items = await collect(
+      createYouTubeAdapter({ apiKey: 'k', fetch }).discoverSearch!(
+        {
+          kind: 'search',
+          params: {
+            q: 'funny animals',
+            regionCode: 'us',
+            relevanceLanguage: 'en',
+            publishedWithinHours: 48,
+            order: 'viewCount',
+            videoDuration: 'short',
+            maxResults: 10,
+          },
+          region: null,
+          limit: 50,
+        },
+        ctx,
+      ),
+    );
+    const search = fetch.requests[0]!.url.searchParams;
+    expect(Object.fromEntries(search)).toEqual({
+      part: 'id',
+      type: 'video',
+      q: 'funny animals',
+      order: 'viewCount',
+      videoDuration: 'short',
+      safeSearch: 'moderate',
+      maxResults: '10',
+      regionCode: 'US',
+      relevanceLanguage: 'en',
+      publishedAfter: '2026-09-26T12:00:00.000Z',
+    });
+    expect(fetch.requests[1]!.url.searchParams.get('id')).toBe(
+      'vdFixture01,vdFixture99,vdFixture04',
+    );
+    // vdFixture99 was in search results but videos.list did not return it.
+    expect(items.map((i) => [i.externalId, i.context['rank']])).toEqual([
+      ['vdFixture01', 1],
+      ['vdFixture04', 3],
+    ]);
+    expect(items[0]).toMatchObject({
+      observationKey: 'search:funny animals:US',
+      context: { search: { q: 'funny animals', order: 'viewCount', videoDuration: 'short' } },
+    });
+    expect(ctx.quota.usage()).toEqual({ 'search.list': 1, default: 1 });
+  });
+
+  it('stops paging when the search budget is spent', async () => {
+    const fetch = createFakeFetch([
+      route('/youtube/v3/search', { body: searchList }),
+      route('/youtube/v3/videos', { body: videosResponse }, byIds),
+    ]);
+    const err = await collect(
+      createYouTubeAdapter({ apiKey: 'k', fetch }).discoverSearch!(
+        { kind: 'search', params: { q: 'fails', pages: 3 }, region: null, limit: 500 },
+        testAdapterContext({ limits: { 'search.list': 1 } }),
+      ),
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(QuotaBudgetExhaustedError);
+    expect(fetch.requests.filter((r) => r.url.pathname.endsWith('/search'))).toHaveLength(1);
+  });
+
+  it('validates search params', async () => {
+    const run = (params: Record<string, unknown>) =>
+      collect(
+        createYouTubeAdapter({ apiKey: 'k', fetch: createFakeFetch([]) }).discoverSearch!(
+          { kind: 'search', params, region: null, limit: 5 },
+          testAdapterContext(),
+        ),
+      );
+    await expect(run({})).rejects.toThrow(/q:/);
+    await expect(run({ q: 'x', order: 'hot' })).rejects.toThrow(/order/);
+    await expect(
+      run({ q: 'x', publishedAfter: '2026-09-01T00:00:00Z', publishedWithinHours: 5 }),
+    ).rejects.toThrow(/either publishedAfter or publishedWithinHours/);
+  });
+});
+
+describe('youtube discoverFeed (seed channels via uploads playlists)', () => {
+  it('resolves uploads playlists, skips uploads outside the window, and batches videos.list', async () => {
+    const fetch = createFakeFetch([
+      route('/youtube/v3/channels', { body: channels }),
+      route('/youtube/v3/playlistItems', { body: uploads }),
+      route('/youtube/v3/videos', { body: { items: [page2.items[0], mostPopular.items[0]] } }),
+    ]);
+    const ctx = testAdapterContext();
+    const items = await collect(
+      createYouTubeAdapter({ apiKey: 'k', fetch }).discoverFeed!(
+        {
+          kind: 'channel_feed',
+          params: {
+            channelId: 'UCvdFixtureChannel000001',
+            maxPerChannel: 3,
+            publishedWithinHours: 72,
+          },
+          region: null,
+          limit: 50,
+        },
+        ctx,
+      ),
+    );
+    expect(fetch.requests.map((r) => r.url.pathname.split('/').pop())).toEqual([
+      'channels',
+      'playlistItems',
+      'videos',
+    ]);
+    expect(fetch.requests[1]!.url.searchParams.get('playlistId')).toBe('UUvdFixtureChannel000001');
+    // vdFixtureOl (published 2025) is outside the 72h window; no search quota is used.
+    expect(fetch.requests[2]!.url.searchParams.get('id')).toBe('vdFixture04,vdFixture01');
+    expect(items.map((i) => i.externalId)).toEqual(['vdFixture04', 'vdFixture01']);
+    expect(items[0]).toMatchObject({
+      observationKey: 'channel:UCvdFixtureChannel000001',
+      context: { channelFeed: { uploadsPlaylistId: 'UUvdFixtureChannel000001' }, rank: 1 },
+    });
+    expect(ctx.quota.usage()).toEqual({ default: 3 });
+  });
+
+  it('uses known uploads playlist ids without channels.list and resolves handles', async () => {
+    const fetch = createFakeFetch([
+      route(
+        '/youtube/v3/channels',
+        { body: channels },
+        (u) => u.searchParams.get('forHandle') === '@fixturepets',
+      ),
+      route('/youtube/v3/playlistItems', { body: { items: [] } }),
+    ]);
+    await collect(
+      createYouTubeAdapter({ apiKey: 'k', fetch }).discoverFeed!(
+        {
+          kind: 'channel_feed',
+          params: { uploadsPlaylistId: 'UUvdFixtureChannel000002', handle: 'fixturepets' },
+          region: null,
+          limit: 50,
+        },
+        testAdapterContext(),
+      ),
+    );
+    expect(fetch.requests.map((r) => r.url.pathname.split('/').pop())).toEqual([
+      'channels',
+      'playlistItems',
+      'playlistItems',
+    ]);
+  });
+
+  it('requires at least one channel', async () => {
+    await expect(
+      collect(
+        createYouTubeAdapter({ apiKey: 'k', fetch: createFakeFetch([]) }).discoverFeed!(
+          { kind: 'channel_feed', params: {}, region: null, limit: 5 },
+          testAdapterContext(),
+        ),
+      ),
+    ).rejects.toThrow(/set channelId, handle, or uploadsPlaylistId/);
+  });
+});
+
+describe('youtube statsBatchSize', () => {
+  it('is an application setting, configurable per adapter', async () => {
+    const fetch = createFakeFetch([
+      route('/youtube/v3/videos:batchGetStats', { body: { items: [] } }),
+    ]);
+    const refs = Array.from({ length: 25 }, (_, i) => ({
+      platformVideoId: `id${String(i).padStart(9, '0')}`,
+      canonicalUrl: 'https://www.youtube.com/watch?v=x',
+    }));
+    await createYouTubeAdapter({ apiKey: 'k', fetch, statsBatchSize: 10 }).refreshMetrics!(
+      refs,
+      testAdapterContext(),
+    );
+    expect(fetch.requests.map((r) => r.url.searchParams.get('id')?.split(',').length)).toEqual([
+      10, 10, 5,
+    ]);
+    expect(() => createYouTubeAdapter({ apiKey: 'k', statsBatchSize: 0 })).toThrow(
+      /positive integer/,
+    );
   });
 });

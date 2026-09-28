@@ -50,15 +50,26 @@ export function usageDate(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
-/** A run's budget: the source's daily budgets minus what was already used today. */
+/**
+ * A run's budget: per bucket, the source's configured daily budget — or, for a
+ * bucket the source row does not configure yet (e.g. a bucket added in a later
+ * adapter version), the manifest's verified default — minus today's usage.
+ * Buckets with neither are locally unlimited (the platform still enforces its own).
+ */
 export async function loadQuotaBudget(
   db: Executor,
   source: SourceRow,
   now: Date,
+  manifest?: AdapterManifest,
 ): Promise<QuotaBudget> {
   const used = await usedToday(db, source.id, usageDate(now));
+  const limits: Record<string, number> = {};
+  for (const bucket of manifest?.quotaBuckets ?? []) {
+    if (bucket.defaultDailyBudget !== null) limits[bucket.name] = bucket.defaultDailyBudget;
+  }
+  Object.assign(limits, source.dailyQuotaBudgets);
   const remaining = Object.fromEntries(
-    Object.entries(source.dailyQuotaBudgets).map(([bucket, limit]) => [
+    Object.entries(limits).map(([bucket, limit]) => [
       bucket,
       Math.max(0, limit - (used[bucket] ?? 0)),
     ]),

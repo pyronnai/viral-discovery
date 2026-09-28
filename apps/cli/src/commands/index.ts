@@ -5,7 +5,9 @@ import { registerConfigCheck } from './config-check.ts';
 import { registerDbCheck } from './db-check.ts';
 import { registerDiscover } from './discover.ts';
 import { registerHealth } from './health.ts';
+import { registerQueries } from './queries.ts';
 import { registerRefreshMetrics } from './refresh-metrics.ts';
+import { registerScheduling } from './scheduling.ts';
 import { registerSubmitUrl } from './submit-url.ts';
 
 export type CommandRegistrar = (program: Command, io: CommandIO) => void;
@@ -22,4 +24,6 @@ export const COMMANDS: readonly CommandRegistrar[] = [
   registerDiscover,
   registerSubmitUrl,
   registerRefreshMetrics,
+  registerQueries,
+  registerScheduling,
 ];

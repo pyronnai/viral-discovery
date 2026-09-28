@@ -1,7 +1,7 @@
 # Source: YouTube
 
-_Verified 2026-09-28 against the official YouTube Data API v3 reference. Adapter
-status: **implemented** (`packages/adapters/youtube`, adapter id `youtube`)._
+_Verified 2026-09-28; search/channel methods verified 2026-09-29. Adapter status:
+**implemented** (`packages/adapters/youtube`, adapter id `youtube`)._
 
 Primary references (all read 2026-09-28):
 
@@ -10,6 +10,9 @@ Primary references (all read 2026-09-28):
 - Video resource — https://developers.google.com/youtube/v3/docs/videos (updated 2026-09-16)
 - Revision history — https://developers.google.com/youtube/v3/revision_history (updated 2026-09-14)
 - Quota and compliance audits — https://developers.google.com/youtube/v3/guides/quota_and_compliance_audits (read in Phase 1, same day)
+- `search.list` — https://developers.google.com/youtube/v3/docs/search/list (updated 2026-09-14, read 2026-09-29)
+- `playlistItems.list` — https://developers.google.com/youtube/v3/docs/playlistItems/list (updated 2026-09-14)
+- `channels.list` / channel resource — https://developers.google.com/youtube/v3/docs/channels (updated 2026-09-16)
 
 ## VERIFIED CURRENT BEHAVIOR
 
@@ -33,6 +36,18 @@ Primary references (all read 2026-09-28):
 - Thumbnail keys include `default`, `medium`, `high`, `standard`, `maxres`, and newer `fhd`, `qhd`, `uhd`.
 - `contentDetails.duration` is ISO 8601 (`PT15M33S`).
 - The video resource has **no field that identifies a Short.**
+- **`search.list`**: "a quota cost of 1 unit in the Search Queries quota bucket", **100 calls/day**
+  by default. Params used: `q` (supports `-` NOT and `|` OR), `type=video`, `regionCode`,
+  `relevanceLanguage` (ISO 639-1), `publishedAfter`/`publishedBefore` (RFC 3339), `order`
+  (`date`, `rating`, `relevance` default, `title`, `viewCount`), `maxResults` 0–50 (default 5),
+  `videoDuration` (`any`; **`short` = under 4 minutes**; `medium` 4–20 min; `long` > 20 min),
+  `videoCategoryId`, `safeSearch` (`moderate` default), `pageToken`. Items carry `id.videoId`.
+- **`channels.list`**: 1 unit; exactly one of `id` (comma-separated), `forHandle`, `forUsername`,
+  `mine`. `contentDetails.relatedPlaylists.uploads` is "the ID of the playlist that contains the
+  channel's uploaded videos". No maximum id count is stated.
+- **`playlistItems.list`**: 1 unit; `playlistId`, `maxResults` 0–50 (default 5), `pageToken`;
+  items carry `contentDetails.videoId` and `contentDetails.videoPublishedAt`. **No ordering
+  guarantee is stated** for uploads playlists.
 
 ## ACCESS REQUIREMENTS
 
@@ -52,6 +67,19 @@ SourceQuery params (`kind: "trending"`): `regionCode` (list or CSV, **required**
 default country), `videoCategoryId` (list, optional), `maxResults` (1–50, default 50),
 `pages` (1–10, default 1). Falls back to `SourceQuery.region` when `regionCode` is absent.
 
+Search params (`kind: "search"`, one theme per SourceQuery — themes are data, never code):
+`q` (required), `regionCode`, `relevanceLanguage`, `publishedAfter` **or**
+`publishedWithinHours`, `order` (default `relevance`), `videoDuration` (default `any`),
+`videoCategoryId`, `safeSearch` (default `moderate`), `maxResults` 1–50 (default 25),
+`pages` 1–5 (default 1; each page = 1 `search.list` call). Search hits that `videos.list`
+no longer returns are skipped. Sighting context keeps the search, observation key
+`search:<q>:<region>`.
+
+Channel-feed params (`kind: "channel_feed"`): `channelId` (UC…), `handle` (@…), and/or
+`uploadsPlaylistId` (UU…, skips `channels.list`); `maxPerChannel` 1–50 (default 10);
+`publishedWithinHours` (skips older uploads **before** spending `videos.list` quota).
+Observation key `channel:<channel>`. No seed channels are configured in code.
+
 **Short-form heuristic.** The only short-form signal used is **duration**, applied as the
 generic `--max-duration` filter _after_ normalization. Filtered videos are counted and
 sampled on the discovery run (`discovery_runs.stats.filteredSamples`), never silently dropped.
@@ -68,8 +96,11 @@ The adapter does not label anything a "Short".
 
 ## QUOTA / RATE LIMIT INFORMATION
 
-Default source budgets (`sources.daily_quota_budgets`, editable per source):
-`{"default": 10000, "videos.batchGetStats": 10000}`. One chart page = 1 `default` unit;
+Default source budgets (`sources.daily_quota_budgets`, editable per source; manifest
+defaults fill buckets a source row does not list):
+`{"default": 10000, "search.list": 100, "videos.batchGetStats": 10000}`.
+One search page = 1 `search.list` + 1 `default` unit. One seed-channel run = 1 `channels.list`
+per 50 channel ids (+1 per handle) + 1 `playlistItems.list` per channel + 1 `videos.list` per 50 videos. One chart page = 1 `default` unit;
 one refresh of ≤50 videos = 1 `videos.batchGetStats` unit. Usage is written to `api_usage`
 per UTC day (YouTube resets quota at midnight Pacific time, so accounting is approximate
 at the day boundary). Errors `quotaExceeded`/`dailyLimitExceeded` → `quota_exceeded`;
@@ -79,11 +110,15 @@ at the day boundary). Errors `quotaExceeded`/`dailyLimitExceeded` → `quota_exc
 
 - **`mostPopular` is a weak funny-video signal now** (music/movies/gaming). Comedy (23) or
   Pets & Animals (15) filters may return few or no videos in many regions.
-- `batchGetStats` publishes **no per-request id limit**; 50 is our conservative choice.
+- `batchGetStats` publishes **no per-request id limit**. The 50-id batch is an
+  **application batch size** (mirrors `videos.list?id=`), configurable with
+  `YOUTUBE_STATS_BATCH_SIZE` — not a documented YouTube limit.
+- `videoDuration=short` is "under 4 minutes", **not** "is a YouTube Short".
+- Uploads-playlist order is not documented; `maxPerChannel` takes the first N items returned.
 - `failedVideoIds` gives no reason, so unreturned videos are `availability: unknown`.
 - Snippet has no `@handle`; creators are keyed by channel id with the channel title as display name.
 - **Views before and after 2026-08-24 are not comparable.** Use velocity between our own snapshots.
-- `search.list` (100 calls/day bucket) is not used in Phase 2.
+- `search.list` is the scarcest resource (100 calls/day); see the quota strategy in `docs/architecture.md`.
 
 ## COMPLIANCE CONSIDERATIONS
 
@@ -95,8 +130,7 @@ at the day boundary). Errors `quotaExceeded`/`dailyLimitExceeded` → `quota_exc
 
 ## OPEN QUESTIONS
 
-1. Where do "trending funny" YouTube candidates come from now? Candidates: curated
-   channel feeds, a small `search.list` budget, and links surfaced by Bluesky and manual submissions.
+1. Which search themes and seed channels perform best — now a data/tuning question (SourceQueries), not code.
 2. Actual per-request id limit of `batchGetStats`.
 3. Exact data retention/refresh windows in the current Developer Policies.
 4. Whether likes are omitted or zero when hidden by the creator.

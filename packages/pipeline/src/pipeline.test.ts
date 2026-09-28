@@ -224,9 +224,24 @@ describe('runDiscovery (YouTube)', () => {
   });
 
   it('rejects unsupported query kinds with the supported ones', async () => {
+    const bsky = createBlueskyAdapter({ fetch: createFakeFetch([]) });
     await expect(
-      runDiscovery(testDeps(db, [youtube()], clock.now), { ...ytTrending, kind: 'search' }),
-    ).rejects.toThrow(/does not support "search" discovery \(supports: trending\)/);
+      runDiscovery(testDeps(db, [bsky], clock.now), {
+        adapterId: 'bluesky',
+        kind: 'trending',
+        params: {},
+        limit: 5,
+      }),
+    ).rejects.toThrow(/does not support "trending" discovery \(supports: search\)/);
+    // community_feed shares the discovery.feed capability; YouTube refuses it explicitly.
+    const run = await runDiscovery(testDeps(db, [youtube()], clock.now), {
+      ...ytTrending,
+      kind: 'community_feed',
+    });
+    expect(run).toMatchObject({
+      status: 'failed',
+      error: 'youtube feeds support kind "channel_feed" only, not "community_feed"',
+    });
   });
 
   it('runs a stored multi-region SourceQuery', async () => {

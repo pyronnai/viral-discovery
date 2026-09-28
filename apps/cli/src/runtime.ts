@@ -41,7 +41,12 @@ export async function withPipeline<T>(
     applicationName: 'viral-discovery-cli',
   });
   try {
-    return await fn({ db: handle.db, registry: runtime.wired.registry, logger: runtime.logger });
+    return await fn({
+      db: handle.db,
+      registry: runtime.wired.registry,
+      logger: runtime.logger,
+      adapterPlatforms: runtime.wired.platforms,
+    });
   } finally {
     await handle.close();
   }
@@ -52,7 +57,18 @@ export async function withPipeline<T>(
  * print only their message; stack traces are for logs, not terminals.
  */
 export function fail(io: CommandIO, json: boolean, err: unknown): void {
-  const message = err instanceof Error ? err.message : String(err);
+  // Drizzle wraps driver errors as "Failed query: <SQL> params: …"; show the root cause.
+  let root: unknown = err;
+  while (root instanceof Error && root.cause instanceof Error) root = root.cause;
+  const message =
+    root !== err &&
+    root instanceof Error &&
+    err instanceof Error &&
+    err.message.startsWith('Failed query')
+      ? `database error: ${root.message}`
+      : err instanceof Error
+        ? err.message
+        : String(err);
   const kind = err instanceof UpstreamError ? err.kind : err instanceof Error ? err.name : 'Error';
   if (json) io.out(JSON.stringify({ ok: false, error: { kind, message } }, null, 2));
   else io.err(`✖ ${message}`);

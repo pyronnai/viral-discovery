@@ -138,7 +138,7 @@ async function enrich(
   const adapterId = adapter.manifest.id;
   const now = deps.now ?? (() => new Date());
   const source = await ensureSource(deps.db, adapter.manifest);
-  const quota = await loadQuotaBudget(deps.db, source, now());
+  const quota = await loadQuotaBudget(deps.db, source, now(), adapter.manifest);
   try {
     const raw = await adapter.lookupUrl(url, adapterContext(deps, adapter, quota));
     if (!raw) {

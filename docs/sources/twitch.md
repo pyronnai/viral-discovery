@@ -45,6 +45,10 @@ is sent only in the token request **body**. The adapter is registered only when 
 Shared params: `startedAt`+`endedAt` **or** `lookbackHours` (relative to the run clock),
 `first` (1–100), `pages` (1–10), `isFeatured`.
 
+`channel_feed` is served by `discovery.feed`; the `community_feed` kind (same capability in the
+contract) is rejected explicitly. Refresh uses Get Clips `id=` in bulk (≤ 100 per call) on
+the refresh ladder; only `views` exist, so velocity is view-based and engagement is unavailable.
+
 ## METRICS AVAILABLE
 
 `views` = `view_count`. Likes, comments, shares: `not_provided_by_platform`.

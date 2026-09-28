@@ -1,5 +1,7 @@
 import { ConfigError, createLogger, loadConfig } from '@vd/config';
-import { buildAdapterRegistry } from './adapters.ts';
+import { buildAdapterRegistry as wire } from '@vd/adapter-wiring';
+import { createDb } from '@vd/db';
+import { pipelineHandlers } from './pipeline-handlers.ts';
 import { startWorker } from './worker.ts';
 
 async function main(): Promise<void> {
@@ -15,17 +17,33 @@ async function main(): Promise<void> {
   }
 
   const logger = createLogger(config, { component: 'worker' });
+  const wired = wire(config);
+  // The pipeline gets its own pool; pg-boss keeps its own connections.
+  const pipelineDb = createDb({
+    url: config.DATABASE_URL,
+    poolMax: Math.max(2, Math.floor(config.DATABASE_POOL_MAX / 2)),
+    applicationName: 'viral-discovery-pipeline',
+  });
   const worker = await startWorker({
     config,
     logger,
-    registry: buildAdapterRegistry(config),
-    handlers: {}, // Phase 1: no job handlers.
+    registry: wired.registry,
+    handlers: pipelineHandlers({
+      db: pipelineDb.db,
+      registry: wired.registry,
+      logger,
+      adapterPlatforms: wired.platforms,
+    }),
+  }).catch(async (err: unknown) => {
+    await pipelineDb.close();
+    throw err;
   });
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'shutdown signal received');
     worker
       .stop()
+      .then(() => pipelineDb.close())
       .then(() => process.exit(0))
       .catch((err: unknown) => {
         logger.error({ err }, 'error during shutdown');
