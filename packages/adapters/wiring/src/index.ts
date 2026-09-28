@@ -34,6 +34,8 @@ export interface WiredAdapters {
   statuses: AdapterStatus[];
   /** adapter id → platform for every known adapter, configured or not. */
   platforms: Record<string, string>;
+  /** adapter id → sighting role (propagation | provenance) for every known adapter. */
+  sightingRoles: Record<string, 'propagation' | 'provenance'>;
 }
 
 type AdapterConfig = Pick<
@@ -119,6 +121,9 @@ export function buildAdapterRegistry(
     registry,
     statuses,
     platforms: Object.fromEntries(statuses.map((s) => [s.id, s.platform])),
+    sightingRoles: Object.fromEntries(
+      DEFINITIONS.map((d) => [d.manifest.id, d.manifest.sightingRole]),
+    ),
   };
 }
 

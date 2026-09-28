@@ -33,6 +33,7 @@ async function main(): Promise<void> {
       registry: wired.registry,
       logger,
       adapterPlatforms: wired.platforms,
+      adapterSightingRoles: wired.sightingRoles,
     }),
   }).catch(async (err: unknown) => {
     await pipelineDb.close();

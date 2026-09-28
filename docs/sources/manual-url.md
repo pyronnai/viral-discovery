@@ -42,6 +42,11 @@ None. TikTok oEmbed needs no key.
 
 Submitting the same video again (in any URL form) never duplicates the video; each submission adds a sighting.
 
+**Scoring role:** manual submissions are **provenance, not propagation**
+(`manifest.sightingRole = "provenance"`). They are stored, reviewable, and enrich the video,
+but never raise cross-source, source-propagation, or confidence — pasting a URL ten times
+cannot change a video's virality score.
+
 ## METRICS AVAILABLE
 
 None from this adapter. Metrics come only from canonical-platform enrichment or later `refresh-metrics`.

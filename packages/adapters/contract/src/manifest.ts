@@ -55,6 +55,13 @@ export const AdapterManifestSchema = z
      * it carries no metrics and never overwrites data from the canonical platform.
      */
     referencePlatforms: z.array(PlatformIdSchema).default([]),
+    /**
+     * What this adapter's sightings are evidence of. "propagation": the video was
+     * observed spreading on the public internet (charts, searches, posts linking
+     * it). "provenance": how a video entered the system without implying spread
+     * (e.g. a human pasting a URL) — kept for review, excluded from virality.
+     */
+    sightingRole: z.enum(['propagation', 'provenance']).default('propagation'),
     quotaBuckets: z.array(QuotaBucketSchema).default([]),
     /** Env var names the adapter needs. Values are never stored in the manifest. */
     requiredEnv: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/)).default([]),

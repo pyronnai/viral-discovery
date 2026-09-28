@@ -1,0 +1,1 @@
+ALTER TABLE "scores" ADD COLUMN "next_rescore_at" timestamp with time zone;

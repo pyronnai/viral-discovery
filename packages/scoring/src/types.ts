@@ -14,8 +14,21 @@ export interface SourceEngagement {
   quotes: number | null;
 }
 
+/**
+ * What a sighting is evidence of.
+ * - propagation: the video was observed on the public internet by an automated
+ *   source (a chart, a search, a post linking it) — evidence that it spreads.
+ * - provenance:  how the video entered our system without saying anything about
+ *   spread (a human pasting a URL). Kept for provenance/review, never counted
+ *   as propagation. Declared per adapter (manifest.sightingRole).
+ */
+export type SightingRole = 'propagation' | 'provenance';
+
 export interface SightingInput {
   sourceId: string;
+  /** Human-readable source name for explanations (e.g. "youtube", "manual-url"). */
+  sourceLabel: string;
+  role: SightingRole;
   /** Platform of the adapter behind the source; null if unknown. */
   sourcePlatform: string | null;
   observationKey: string;
@@ -25,9 +38,16 @@ export interface SightingInput {
   sourceEngagement: SourceEngagement | null;
 }
 
-/** Latest growth-metric values of the creator's OTHER videos (for the outlier factor). */
+/** One of the creator's OTHER videos: publish time + growth-metric readings over time. */
+export interface CreatorHistoryVideo {
+  /** null = unknown publish time → the video cannot be age-matched. */
+  publishedAt: Date | null;
+  snapshots: { capturedAt: Date; value: number }[];
+}
+
+/** The creator's other videos, for the age-matched outlier factor. */
 export interface CreatorHistory {
-  otherVideoValues: number[];
+  videos: CreatorHistoryVideo[];
 }
 
 /**
@@ -103,4 +123,14 @@ export interface ScoreResult {
   reasonCodes: string[];
   missingMetrics: MetricKey[];
   growthMetric: GrowthMetric | null;
+  /** Which sightings counted as public propagation and which did not (for UIs). */
+  observations: {
+    publicPropagation: { source: string; observations: number }[];
+    nonPropagation: { source: string; observations: number }[];
+  };
+  /**
+   * When time alone (freshness decay) makes this score stale; null when time-only
+   * rescoring is not useful (insufficient evidence, or aged out of the window).
+   */
+  nextRescoreAt: Date | null;
 }

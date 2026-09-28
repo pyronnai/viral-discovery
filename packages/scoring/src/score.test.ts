@@ -3,7 +3,7 @@ import { DEFAULT_SCORING_CONFIG } from './config.ts';
 import { evidenceFingerprint } from './fingerprint.ts';
 import { explainScore } from './explain.ts';
 import { percentile, scoreCandidate } from './score.ts';
-import type { ScoringInput, SightingInput, SnapshotInput } from './types.ts';
+import type { CreatorHistoryVideo, ScoringInput, SightingInput, SnapshotInput } from './types.ts';
 
 // Fixed clock: no test depends on the wall clock.
 const T0 = Date.parse('2026-09-28T00:00:00Z');
@@ -14,6 +14,8 @@ const snap = (hours: number, metrics: SnapshotInput['metrics']): SnapshotInput =
 });
 const sighting = (over: Partial<SightingInput> = {}): SightingInput => ({
   sourceId: 'src-youtube',
+  sourceLabel: over.sourceId ?? 'src-youtube',
+  role: 'propagation',
   sourcePlatform: 'youtube',
   observationKey: 'mostPopular:US:all',
   runId: 'run-1',
@@ -29,7 +31,7 @@ function input(over: Partial<ScoringInput> = {}): ScoringInput {
     firstDiscoveredAt: at(0),
     snapshots: [],
     sightings: [sighting()],
-    creator: { otherVideoValues: [] },
+    creator: { videos: [] },
     population: { logVelocity: {}, engagementRate: {} },
     asOf: at(2),
     ...over,
@@ -337,49 +339,162 @@ describe('source-context engagement is isolated from canonical metrics', () => {
   });
 });
 
-describe('creator outlier', () => {
-  const growth = [snap(0, views(20_000)), snap(2, views(50_000))];
-  it('is unavailable without enough history — no fabricated baseline', () => {
+describe('creator outlier (age-matched)', () => {
+  // Candidate: published at -2h, 50k views at +2h → age 4h. Window = max(1h, 25% × 4h) = ±1h.
+  const candidate = {
+    publishedAt: at(-2),
+    snapshots: [snap(0, views(20_000)), snap(2, views(50_000))],
+  };
+  /** A historical video published `publishedDaysAgo` days before T0 with readings at the given ages (hours). */
+  const history = (
+    publishedDaysAgo: number,
+    readings: [ageHours: number, value: number][],
+  ): CreatorHistoryVideo => {
+    const published = at(-24 * publishedDaysAgo);
+    return {
+      publishedAt: published,
+      snapshots: readings.map(([age, value]) => ({
+        capturedAt: new Date(published.getTime() + age * 3_600_000),
+        value,
+      })),
+    };
+  };
+
+  it('A: 50k at 4h vs a creator who usually has 5k–8k around 4h → strong outlier', () => {
     const r = scoreCandidate(
-      input({ snapshots: growth, creator: { otherVideoValues: [4_000, 6_000] } }),
+      input({
+        ...candidate,
+        creator: {
+          videos: [
+            history(10, [
+              [4, 5_000],
+              [24, 20_000],
+            ]),
+            history(20, [[3.5, 6_000]]),
+            history(30, [[4.5, 7_000]]),
+            history(40, [[4.2, 8_000]]),
+            history(50, [[3.2, 6_500]]),
+            history(60, [[3.9, 5_500]]),
+          ],
+        },
+      }),
+    );
+    expect(r.components.creatorOutlier).toMatchObject({
+      available: true,
+      strength: 'strong',
+      details: {
+        targetAgeHours: 4,
+        windowHours: 1,
+        ageMatched: 6,
+        baselineMedian: 6_250,
+        ratio: 8,
+      },
+    });
+    expect(r.reasonCodes).toContain('CREATOR_OUTLIER');
+  });
+
+  it('B: creator history only has 7-day-old readings → unavailable, never compared directly', () => {
+    const r = scoreCandidate(
+      input({
+        ...candidate,
+        creator: { videos: [10, 20, 30, 40, 50, 60].map((d) => history(d, [[168, 5_000]])) },
+      }),
     );
     expect(r.components.creatorOutlier).toMatchObject({
       available: false,
-      reason: 'insufficient creator history (2 < 5 videos)',
+      reason:
+        'insufficient age-matched creator history: 0 of 6 other videos have a reading within ±1h of age 4h (need 5)',
+      details: { ageMatched: 0, creatorVideos: 6, withPublishTime: 6 },
     });
     expect(r.reasonCodes).toContain('CREATOR_BASELINE_UNAVAILABLE');
+  });
+
+  it('C: creator routinely has 100k around 4h → not an outlier', () => {
+    const r = scoreCandidate(
+      input({
+        ...candidate,
+        creator: {
+          videos: [10, 20, 30, 40, 50].map((d, i) => history(d, [[3.5 + i * 0.2, 100_000]])),
+        },
+      }),
+    );
+    expect(r.components.creatorOutlier).toMatchObject({
+      available: true,
+      value: 0,
+      strength: 'very weak',
+      details: { ratio: 0.5 },
+    });
+    expect(r.reasonCodes).not.toContain('CREATOR_OUTLIER');
+  });
+
+  it('picks the nearest reading inside the window and never interpolates across a gap', () => {
+    const nearest = scoreCandidate(
+      input({
+        ...candidate,
+        creator: {
+          videos: [1, 2, 3, 4, 5].map((d) =>
+            history(d, [
+              [3.1, 1_000],
+              [4.1, 9_000],
+              [4.9, 2_000],
+            ]),
+          ),
+        },
+      }),
+    );
+    expect(nearest.components.creatorOutlier).toMatchObject({
+      available: true,
+      details: { baselineMedian: 9_000 },
+    });
+    // Readings at 1h and 8h bracket 4h but are outside ±1h: no interpolated baseline.
+    const gap = scoreCandidate(
+      input({
+        ...candidate,
+        creator: {
+          videos: [1, 2, 3, 4, 5].map((d) =>
+            history(d, [
+              [1, 1_000],
+              [8, 9_000],
+            ]),
+          ),
+        },
+      }),
+    );
+    expect(gap.components.creatorOutlier).toMatchObject({
+      available: false,
+      details: { ageMatched: 0 },
+    });
+  });
+
+  it('is unavailable without publish times or a creator, with the reason exposed', () => {
+    const noCandidatePublish = scoreCandidate(
+      input({ ...candidate, publishedAt: null, creator: { videos: [] } }),
+    );
+    expect(noCandidatePublish.components.creatorOutlier).toMatchObject({
+      available: false,
+      reason: 'candidate publish time unknown; cannot age-match',
+    });
+    const noHistoryPublish = scoreCandidate(
+      input({
+        ...candidate,
+        creator: {
+          videos: [1, 2, 3, 4, 5].map(() => ({
+            publishedAt: null,
+            snapshots: [{ capturedAt: at(0), value: 5_000 }],
+          })),
+        },
+      }),
+    );
+    expect(noHistoryPublish.components.creatorOutlier).toMatchObject({
+      available: false,
+      details: { withPublishTime: 0 },
+    });
     expect(
-      scoreCandidate(input({ snapshots: growth, creator: null })).components.creatorOutlier,
+      scoreCandidate(input({ ...candidate, creator: null })).components.creatorOutlier,
     ).toMatchObject({
       available: false,
       reason: 'no creator identity',
     });
-  });
-
-  it('50k from a 5k-median creator outscores 500k from a 1m-median creator on this component', () => {
-    const smallCreator = scoreCandidate(
-      input({
-        snapshots: growth,
-        creator: { otherVideoValues: [3_000, 4_000, 5_000, 6_000, 7_000] },
-      }),
-    );
-    const bigCreator = scoreCandidate(
-      input({
-        snapshots: [snap(0, views(470_000)), snap(2, views(500_000))],
-        creator: { otherVideoValues: [800_000, 900_000, 1_000_000, 1_100_000, 1_200_000] },
-      }),
-    );
-    expect(smallCreator.components.creatorOutlier).toMatchObject({
-      available: true,
-      value: 0.7686,
-      details: { ratio: 10 },
-    });
-    expect(bigCreator.components.creatorOutlier).toMatchObject({
-      available: true,
-      value: 0,
-      details: { ratio: 0.5 },
-    });
-    expect(smallCreator.reasonCodes).toContain('CREATOR_OUTLIER');
   });
 });
 
@@ -435,7 +550,7 @@ describe('versioning and determinism', () => {
       version: 'breakout-v1-test',
       freshnessHalfLifeHours: 12,
     };
-    expect(scoreCandidate(base).algorithmVersion).toBe('breakout-v1');
+    expect(scoreCandidate(base).algorithmVersion).toBe('breakout-v1.1');
     expect(scoreCandidate(base, config).algorithmVersion).toBe('breakout-v1-test');
     expect(evidenceFingerprint(base, config)).not.toBe(
       evidenceFingerprint(base, DEFAULT_SCORING_CONFIG),
@@ -475,8 +590,136 @@ describe('versioning and determinism', () => {
   it('renders an explanation', () => {
     const lines = explainScore(scoreCandidate(base));
     expect(lines[0]).toMatch(
-      /^Virality score: \d+(\.\d)? \(scored; confidence 0\.7; breakout-v1\)$/,
+      /^Virality score: \d+(\.\d)? \(scored; confidence 0\.7; breakout-v1\.1\)$/,
     );
-    expect(lines.join('\n')).toMatch(/creator outlier: unavailable \(insufficient creator history/);
+    expect(lines.join('\n')).toMatch(
+      /creator outlier: unavailable \(insufficient age-matched creator history/,
+    );
+  });
+});
+
+describe('manual submissions are not propagation evidence', () => {
+  const growth = [snap(0, views(12_000, 900, 60)), snap(2, views(48_000, 3_900, 240))];
+  const publicSightings = [
+    sighting({ sourceId: 'youtube' }),
+    sighting({
+      sourceId: 'bluesky',
+      sourcePlatform: 'bluesky',
+      observationKey: 'at://p1',
+      sourceEngagement: { likes: 420, reposts: 95, replies: 30, quotes: 6 },
+    }),
+    sighting({
+      sourceId: 'bluesky',
+      sourcePlatform: 'bluesky',
+      observationKey: 'at://p2',
+      sourceEngagement: { likes: 130, reposts: 22, replies: 8, quotes: 1 },
+    }),
+  ];
+  const manual = (i: number) =>
+    sighting({
+      sourceId: 'manual-url',
+      role: 'provenance',
+      sourcePlatform: 'manual',
+      observationKey: `youtube:x#${i}`,
+      seenAt: at(1 + i / 100),
+    });
+
+  it('ten manual submissions cannot increase any propagation signal or the score', () => {
+    const base = scoreCandidate(input({ snapshots: growth, sightings: publicSightings }));
+    const withManual = scoreCandidate(
+      input({
+        snapshots: growth,
+        sightings: [...publicSightings, ...Array.from({ length: 10 }, (_, i) => manual(i))],
+      }),
+    );
+    expect(withManual.score).toBe(base.score);
+    expect(withManual.confidence).toBe(base.confidence);
+    expect(withManual.components.sourcePropagation).toEqual(base.components.sourcePropagation);
+    expect(
+      withManual.components.crossSource.available && withManual.components.crossSource.value,
+    ).toBe(base.components.crossSource.available && base.components.crossSource.value);
+    expect(withManual.components.crossSource).toMatchObject({
+      details: {
+        distinctSources: 2,
+        independentObservations: 3,
+        publicSources: ['bluesky', 'youtube'],
+        nonPropagationObservations: [{ source: 'manual-url', observations: 10 }],
+      },
+    });
+    expect(withManual.observations).toEqual({
+      publicPropagation: [
+        { source: 'bluesky', observations: 2 },
+        { source: 'youtube', observations: 1 },
+      ],
+      nonPropagation: [{ source: 'manual-url', observations: 10 }],
+    });
+    expect(withManual.reasonCodes).toContain('NON_PROPAGATION_OBSERVATIONS');
+    expect(withManual.reasonCodes).toContain('CROSS_SOURCE_2');
+    expect(withManual.reasonCodes).not.toContain('CROSS_SOURCE_3');
+  });
+
+  it('a manual-only video has zero cross-source evidence (not "unavailable", which would help it)', () => {
+    const r = scoreCandidate(input({ snapshots: growth, sightings: [manual(0)] }));
+    expect(r.components.crossSource).toMatchObject({
+      available: true,
+      value: 0,
+      details: { distinctSources: 0 },
+    });
+  });
+
+  it('provenance sightings never contribute source engagement', () => {
+    const withEngagement = {
+      ...manual(0),
+      sourceEngagement: { likes: 10_000, reposts: 10_000, replies: 0, quotes: 0 },
+    };
+    const r = scoreCandidate(input({ snapshots: growth, sightings: [sighting(), withEngagement] }));
+    expect(r.components.sourcePropagation).toMatchObject({ available: false });
+  });
+
+  it('explains public propagation and non-propagation observations separately', () => {
+    const lines = explainScore(
+      scoreCandidate(input({ snapshots: growth, sightings: [...publicSightings, manual(0)] })),
+    ).join('\n');
+    expect(lines).toMatch(/public propagation sources: bluesky ×2, youtube ×1/);
+    expect(lines).toMatch(/non-propagation observations: manual-url ×1 \(not counted as spread\)/);
+  });
+});
+
+describe('time-based staleness', () => {
+  const growth = [snap(0, views(10_000)), snap(2, views(30_000))];
+
+  it('a fresh video scores lower later with the same evidence', () => {
+    const now = scoreCandidate(input({ snapshots: growth, asOf: at(2) }));
+    const later = scoreCandidate(input({ snapshots: growth, asOf: at(26) }));
+    expect(later.score!).toBeLessThan(now.score!);
+    expect(later.components.freshness.available && later.components.freshness.value).toBeLessThan(
+      (now.components.freshness.available && now.components.freshness.value) || 0,
+    );
+  });
+
+  it('schedules the next rescore when freshness will have dropped by the configured delta', () => {
+    const r = scoreCandidate(input({ snapshots: growth, asOf: at(2) }));
+    // Age 3h → freshness 0.9439; target 0.8939 → age 36 × log2(1/0.8939) ≈ 5.83h → at(-1) + 5.83h.
+    expect(r.nextRescoreAt!.getTime()).toBeGreaterThan(at(4.8).getTime());
+    expect(r.nextRescoreAt!.getTime()).toBeLessThan(at(4.9).getTime());
+  });
+
+  it('ages out: no time-only rescoring once freshness is below the floor', () => {
+    const old = scoreCandidate(input({ snapshots: growth, publishedAt: at(-24 * 8), asOf: at(2) }));
+    expect(old.nextRescoreAt).toBeNull();
+    // The last scheduled step lands exactly on the floor, after which scheduling stops.
+    const nearFloor = scoreCandidate(
+      input({ snapshots: growth, publishedAt: at(-150), asOf: at(2) }),
+    );
+    const age = (nearFloor.nextRescoreAt!.getTime() - at(-150).getTime()) / 3_600_000;
+    expect(0.5 ** (age / 36)).toBeCloseTo(0.05, 3);
+    const atFloor = scoreCandidate(
+      input({ snapshots: growth, publishedAt: at(-150), asOf: nearFloor.nextRescoreAt! }),
+    );
+    expect(atFloor.nextRescoreAt).toBeNull();
+  });
+
+  it('insufficient evidence never needs time-only rescoring', () => {
+    expect(scoreCandidate(input({ snapshots: [] })).nextRescoreAt).toBeNull();
   });
 });

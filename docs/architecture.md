@@ -28,7 +28,7 @@ re-host third-party media, and it does not depend on any generative-video tool.
 | **Enrichment**       | Fill a referenced video from its canonical platform's adapter (`discovery.url`).                                                                                                             | For `submit-url` only. `creator.enrich` not implemented.                       |
 | **Deduplication**    | Exact: `(platform, platform_video_id)` unique. Near-duplicate: cluster by thumbnail hash + duration + title similarity into `clusters`. Review status is per cluster, so reposts inherit it. | Exact dedupe implemented. Clustering not implemented.                          |
 | **Metric snapshots** | Time series of engagement readings. Every metric is explicitly a value or unavailable-with-reason.                                                                                           | Initial snapshot on ingest + refresh ladder (`refresh-metrics --due`, `tick`). |
-| **Scoring**          | Velocity/engagement/outlier/freshness score, per-platform normalized, **versioned** (`scores.algorithm_version`).                                                                            | `@vd/scoring` breakout-v1 + `rescore` / `score-video` job.                     |
+| **Scoring**          | Velocity/engagement/outlier/freshness score, per-platform normalized, **versioned** (`scores.algorithm_version`).                                                                            | `@vd/scoring` breakout-v1.1 + `rescore` / `score-video` job.                   |
 | **Classification**   | Multi-label categories + safety flags, **versioned** by taxonomy, model, and prompt.                                                                                                         | Table only. Not implemented.                                                   |
 | **Review**           | Human decisions (`approved`, `rejected`, `saved`, `already_used`) as an append-only event log per cluster.                                                                                   | Table. No UI.                                                                  |
 
@@ -207,7 +207,11 @@ allowlisted TikTok short links with bounded HEAD redirects and never fetches vid
   **YouTube documents no maximum**; Twitch Get Clips ≤ 100 ids; Bluesky `getPosts` ≤ 25).
 - Platforms without canonical metrics (TikTok via oEmbed) are never refreshed; nothing is fabricated.
 
-## Virality / breakout scoring v1 (`breakout-v1`)
+## Virality / breakout scoring (`breakout-v1.1`)
+
+_v1.1 (Phase 3.1) changed only evidence selection and aging — manual submissions excluded from
+propagation, age-matched creator outlier, time-based staleness. Weights and fallback constants
+are unchanged and still uncalibrated._
 
 Goal: _which candidates are breaking out unusually fast for their age and context_ — not
 "most total views". Pure and deterministic (`@vd/scoring`), no LLM, no clock inside.
@@ -225,9 +229,9 @@ punished for a metric it does not expose. Low evidence dampens the score.
 | acceleration      | 0.10   | canonical          | needs 3 spaced snapshots: later ÷ earlier velocity, 0.5 + log2(ratio)/4 (×4 → 1, flat → 0.5, ×¼ → 0)                                                                                                                               |
 | engagement        | 0.15   | canonical          | mean over **supplied** likes/comments/shares ÷ views (≥ 100 views), percentile or reference (5 % / 0.5 % / 0.5 %)                                                                                                                  |
 | freshness         | 0.15   | canonical          | 0.5^(age h / 36); age from `published_at`, else `first_discovered_at` (flagged, lower confidence)                                                                                                                                  |
-| crossSource       | 0.10   | discovery          | 0.6 × min(1, (distinct sources − 1)/2) + 0.4 × min(1, log2(independent observations)/4)                                                                                                                                            |
+| crossSource       | 0.10   | discovery          | **public propagation sightings only**: 0.6 × min(1, (distinct public sources − 1)/2) + 0.4 × min(1, log2(independent public observations)/4)                                                                                       |
 | sourcePropagation | 0.10   | source_propagation | log10(1 + Σ likes+reposts+replies+quotes of discovery-source items) / log10(1001); latest observation per item                                                                                                                     |
-| creatorOutlier    | 0.10   | canonical          | log10(current ÷ creator median) / log10(20); needs ≥ 5 other videos by the creator                                                                                                                                                 |
+| creatorOutlier    | 0.10   | canonical          | **age-matched**: current ÷ median of the creator's other videos at ≈ the same age since publish; log10(ratio)/log10(20); needs ≥ 5 age-matched videos                                                                              |
 
 ### Missing-data behavior
 
@@ -235,8 +239,9 @@ punished for a metric it does not expose. Low evidence dampens the score.
 - No views → likes become the growth metric (`NO_VIEW_METRIC`), engagement unavailable.
 - One snapshot → no velocity (`SINGLE_SNAPSHOT`); snapshots < 30 min apart → `SNAPSHOTS_TOO_CLOSE`.
 - < 3 spaced snapshots → no acceleration. Decreasing counts → Δ = 0 (`METRIC_DECREASED`).
-- Creator baseline with < 5 other videos → unavailable (`CREATOR_BASELINE_UNAVAILABLE`); it
-  strengthens automatically as the dataset grows.
+- Creator outlier needs real publish times (candidate and history) and ≥ 5 other videos with a
+  reading near the candidate's age; otherwise unavailable with the exact reason
+  (`CREATOR_BASELINE_UNAVAILABLE`). It never falls back to comparing different ages.
 
 ### Confidence states
 
@@ -254,7 +259,7 @@ Components are still computed and stored for insufficient-evidence candidates (e
 ### Platform normalization
 
 Velocity (log growth/hour, per growth metric) and engagement ratios are converted to a
-**mid-rank percentile within the platform** over the latest `breakout-v1` score of every other
+**mid-rank percentile within the platform** over the latest score (same algorithm version) of every other
 video on that platform in the last 14 days — once that sample has ≥ 30 values. Below that,
 a documented **absolute fallback scale** is used, the component is labeled
 `normalization: absolute_fallback`, `VELOCITY_NORMALIZATION_FALLBACK` is emitted, and confidence
@@ -270,11 +275,50 @@ is 0.1 lower. Raw counts are never compared across platforms.
 - Cross-source counts **independent observations** = distinct (source, observation key), so
   repeat runs and duplicate sightings in a run cannot inflate it.
 
+### Public propagation vs non-propagation observations
+
+Each adapter declares `manifest.sightingRole`:
+
+- `propagation` (YouTube, Twitch, Bluesky): the video was observed on the public internet —
+  evidence that it spreads.
+- `provenance` (`manual-url`): how the video entered the system (a human pasted it). The
+  sighting is stored, keeps provenance, enables lookup/enrichment and review, but is
+  **excluded** from `crossSource`, `sourcePropagation`, the ≥ 2-sources confidence bonus,
+  and `CROSS_SOURCE_n` reason codes. Unknown adapters are treated as `provenance`.
+
+The pipeline maps adapter → role from manifests (`@vd/adapter-wiring` → `adapterSightingRoles`);
+the scorer only sees `role` on each sighting — no source-name comparisons. Every score exposes
+`observations: { publicPropagation: [{source, observations}], nonPropagation: [...] }`
+(stored in `components._meta.observations`, shown by `rescore --explain`), plus reason code
+`NON_PROPAGATION_OBSERVATIONS`. A manual-only video has `crossSource` = 0 (available), not
+"unavailable", so it gains nothing from having no public sightings.
+
+### Creator outlier: age matching
+
+- Target age = latest candidate reading − candidate `published_at`.
+- For each of the creator's other videos **with a publish time**, take the **nearest** snapshot
+  whose age since publish is within ± max(1 h, 25 % × target age) (configurable:
+  `creatorAgeWindowMinHours`, `creatorAgeWindowRatio`). No interpolation.
+- Baseline = median of the matched readings; requires ≥ 5 matched videos. Details expose
+  `targetAgeHours`, `windowHours`, `creatorVideos`, `withPublishTime`, `ageMatched`, `matched`.
+
+### Time-based staleness
+
+Freshness (half-life 36 h) decays even without new evidence. Each score stores
+`next_rescore_at` = the instant freshness will have dropped by `freshnessRescoreDelta` (0.05),
+or reaches the `freshnessRescoreFloor` (0.05, ≈ 6.5 days old). Below the floor, and for
+`insufficient_evidence`, it is NULL: only new evidence triggers rescoring, so old videos age
+out. The `stale` scope (used by `rescore` and `tick`) selects videos with new evidence **or**
+whose latest score is time-due. A same-evidence rescore stores a new row only when time-due,
+so repeated scheduler runs before the due time are no-ops. Cadence follows the freshness curve:
+roughly every 3–4 h for a 1-day-old video, less often as it ages, then never.
+
 ### Score lifecycle
 
 - `scores` rows: `value`, `state`, `confidence`, `components` (per-component availability,
   value, strength, basis, normalization, details), `missing_metrics`, `reason_codes`,
-  `algorithm_version`, `inputs_hash`, `based_on_snapshot_id`, `computed_at` (= asOf).
+  `algorithm_version`, `inputs_hash`, `based_on_snapshot_id`, `computed_at` (= asOf),
+  `next_rescore_at` (time-based staleness).
 - **Eligibility:** `rescore` (default scope `stale`) selects videos with no score for the
   current version, or with a snapshot/sighting newer than their latest score. Other scopes:
   `--unscored`, `--recent <h>`, `--video <ids>`, `--platform`.
@@ -389,3 +433,14 @@ LLM classification, dashboard, compilation planning (later phases).
 6. **Percentile normalization per platform** only with ≥ 30 samples; otherwise a labeled fallback.
 7. **Idempotent scoring** via evidence fingerprints; the worker handles `discover-source`,
    `refresh-metrics`, `score-video`; `tick` is the cron entry point (no pg-boss schedules yet).
+
+## Decisions (Phase 3.1)
+
+1. **Sighting role is declared by the adapter** (`propagation` | `provenance`); manual
+   submissions are provenance and never count as spread.
+2. **Creator outlier is age-matched** (nearest snapshot within a relative window, publish times
+   required, ≥ 5 matches); otherwise unavailable — never the old age-blind comparison.
+3. **Time-based staleness** via `scores.next_rescore_at` derived from the freshness curve;
+   stops below a floor.
+4. **Algorithm version `breakout-v1.1`**; weights and fallback constants unchanged (not
+   recalibrated against hand-written examples).

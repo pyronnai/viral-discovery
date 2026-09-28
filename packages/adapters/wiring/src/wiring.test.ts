@@ -16,6 +16,15 @@ describe('buildAdapterRegistry', () => {
     ]);
   });
 
+  it('classifies sightings per adapter: only manual submission is provenance', () => {
+    expect(buildAdapterRegistry({}).sightingRoles).toEqual({
+      youtube: 'propagation',
+      twitch: 'propagation',
+      bluesky: 'propagation',
+      'manual-url': 'provenance',
+    });
+  });
+
   it('registers each adapter independently once its own variables are set', () => {
     const { registry } = buildAdapterRegistry({
       YOUTUBE_API_KEY: 'k',

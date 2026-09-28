@@ -25,7 +25,19 @@ export interface ScoringConfig {
   propagationReference: number;
   /** Creator outlier: views ÷ creator median that maps to 1.0. */
   creatorOutlierReferenceRatio: number;
+  /** Creator videos with an age-matched reading needed for a baseline. */
   minCreatorVideos: number;
+  /**
+   * Age matching: a historical snapshot matches when its age (since publish) is
+   * within max(minHours, ratio × candidate age) of the candidate's age. Nearest
+   * snapshot wins; no interpolation.
+   */
+  creatorAgeWindowRatio: number;
+  creatorAgeWindowMinHours: number;
+  /** Time-only rescoring: rescore once freshness has decayed by this much… */
+  freshnessRescoreDelta: number;
+  /** …and stop time-only rescoring once freshness falls to this floor. */
+  freshnessRescoreFloor: number;
   /** Population size needed before percentile normalization replaces the fallback. */
   minPopulation: number;
   /** Acceleration ratio clamp (later velocity ÷ earlier velocity). */
@@ -33,7 +45,9 @@ export interface ScoringConfig {
 }
 
 export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
-  version: 'breakout-v1',
+  // v1.1: manual submissions excluded from propagation; age-matched creator outlier;
+  // time-based staleness. Weights and fallback constants unchanged from v1.
+  version: 'breakout-v1.1',
   weights: {
     velocity: 0.3,
     acceleration: 0.1,
@@ -54,6 +68,10 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   propagationReference: 1_000,
   creatorOutlierReferenceRatio: 20,
   minCreatorVideos: 5,
+  creatorAgeWindowRatio: 0.25,
+  creatorAgeWindowMinHours: 1,
+  freshnessRescoreDelta: 0.05,
+  freshnessRescoreFloor: 0.05,
   minPopulation: 30,
   maxAccelerationRatio: 8,
 };

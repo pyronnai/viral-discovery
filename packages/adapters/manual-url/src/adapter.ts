@@ -33,6 +33,8 @@ export const manifest = AdapterManifestSchema.parse({
   capabilities: ['discovery.url', 'normalize'],
   metricsProvided: [],
   referencePlatforms: ['youtube', 'tiktok', 'twitch'],
+  // A human submission says where a video came from, not that it is spreading.
+  sightingRole: 'provenance',
   quotaBuckets: [
     {
       name: 'tiktok-shortlink',

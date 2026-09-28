@@ -42,6 +42,8 @@ export interface PipelineDeps {
    * (whose sources may still have sightings). Falls back to the registry.
    */
   adapterPlatforms?: Record<string, string>;
+  /** adapter id → sighting role; unknown adapters are treated as provenance (never counted as spread). */
+  adapterSightingRoles?: Record<string, 'propagation' | 'provenance'>;
 }
 
 /** Platform-agnostic filters applied to normalized videos, never to raw payloads. */

@@ -46,6 +46,7 @@ export async function withPipeline<T>(
       registry: runtime.wired.registry,
       logger: runtime.logger,
       adapterPlatforms: runtime.wired.platforms,
+      adapterSightingRoles: runtime.wired.sightingRoles,
     });
   } finally {
     await handle.close();

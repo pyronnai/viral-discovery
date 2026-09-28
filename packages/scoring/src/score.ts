@@ -278,15 +278,33 @@ export function scoreCandidate(
     },
   );
 
-  // ── cross-source evidence (independent observations, not repeat runs) ──────
+  // ── cross-source evidence (independent PUBLIC observations only) ────────────
+  // Provenance sightings (e.g. a human pasting a URL) are kept for review but are
+  // not evidence of spread: they never raise this component, confidence, or reasons.
   let crossSource: Component;
-  const sources = new Set(sightings.map((s) => s.sourceId));
-  const independent = new Set(sightings.map((s) => `${s.sourceId}\u0000${s.observationKey}`));
+  const publicSightings = sightings.filter((s) => s.role === 'propagation');
+  const countBySource = (list: typeof sightings) => {
+    const bySource = new Map<string, Set<string>>();
+    for (const s of list) {
+      const keys = bySource.get(s.sourceLabel) ?? new Set<string>();
+      keys.add(`${s.sourceId}\u0000${s.observationKey}`);
+      bySource.set(s.sourceLabel, keys);
+    }
+    return [...bySource.entries()]
+      .map(([source, keys]) => ({ source, observations: keys.size }))
+      .sort((a, b) => a.source.localeCompare(b.source));
+  };
+  const observations = {
+    publicPropagation: countBySource(publicSightings),
+    nonPropagation: countBySource(sightings.filter((s) => s.role !== 'propagation')),
+  };
+  const sources = new Set(publicSightings.map((s) => s.sourceId));
+  const independent = new Set(publicSightings.map((s) => `${s.sourceId}\u0000${s.observationKey}`));
   if (sightings.length === 0) {
     crossSource = unavailable('no sightings', w.crossSource, 'discovery');
   } else {
     const sourcesScore = clamp01((sources.size - 1) / 2);
-    const observationsScore = clamp01(Math.log2(independent.size) / 4);
+    const observationsScore = independent.size > 0 ? clamp01(Math.log2(independent.size) / 4) : 0;
     crossSource = available(
       0.6 * sourcesScore + 0.4 * observationsScore,
       w.crossSource,
@@ -294,18 +312,21 @@ export function scoreCandidate(
       {
         distinctSources: sources.size,
         independentObservations: independent.size,
+        publicSources: observations.publicPropagation.map((o) => o.source),
+        nonPropagationObservations: observations.nonPropagation,
         totalSightings: sightings.length,
       },
     );
     if (sources.size >= 2) reasons.push(`CROSS_SOURCE_${sources.size}`);
   }
+  if (observations.nonPropagation.length > 0) reasons.push('NON_PROPAGATION_OBSERVATIONS');
 
   // ── discovery-source propagation (e.g. Bluesky post engagement) ─────────────
   // Only from sightings on OTHER platforms: for a native video the post IS the
   // video and its engagement is already canonical.
   let sourcePropagation: Component;
   const latestByObservation = new Map<string, (typeof sightings)[number]>();
-  for (const s of sightings) {
+  for (const s of publicSightings) {
     if (!s.sourceEngagement || s.sourcePlatform === null || s.sourcePlatform === input.platform)
       continue;
     const key = `${s.sourceId}\u0000${s.observationKey}`;
@@ -343,42 +364,79 @@ export function scoreCandidate(
     );
   }
 
-  // ── creator outlier ─────────────────────────────────────────────────────────
+  // ── creator outlier (age-matched) ───────────────────────────────────────────
+  // "How is this video doing at about this age vs the creator's other videos at
+  // about the same age?" Needs a real publish time on both sides; nearest snapshot
+  // within an age window; no interpolation; unavailable otherwise.
   let creatorOutlier: Component;
-  const history = input.creator?.otherVideoValues.filter((v) => Number.isFinite(v) && v >= 0) ?? [];
+  const unavailableCreator = (reason: string, details?: Record<string, unknown>) => {
+    reasons.push('CREATOR_BASELINE_UNAVAILABLE');
+    return unavailable(reason, w.creatorOutlier, 'canonical', details);
+  };
   if (!input.creator) {
-    creatorOutlier = unavailable('no creator identity', w.creatorOutlier, 'canonical');
-    reasons.push('CREATOR_BASELINE_UNAVAILABLE');
-  } else if (history.length < config.minCreatorVideos || !last) {
-    creatorOutlier = unavailable(
-      `insufficient creator history (${history.length} < ${config.minCreatorVideos} videos)`,
-      w.creatorOutlier,
-      'canonical',
-      { sampleSize: history.length },
-    );
-    reasons.push('CREATOR_BASELINE_UNAVAILABLE');
+    creatorOutlier = unavailableCreator('no creator identity');
+  } else if (!last) {
+    creatorOutlier = unavailableCreator('no canonical growth metric');
+  } else if (!input.publishedAt || input.publishedAt.getTime() > last.at) {
+    creatorOutlier = unavailableCreator('candidate publish time unknown; cannot age-match');
   } else {
-    const sorted = [...history].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    const median =
-      sorted.length % 2 ? (sorted[mid] ?? 0) : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
-    if (median <= 0) {
-      creatorOutlier = unavailable('creator baseline is zero', w.creatorOutlier, 'canonical');
-    } else {
-      const ratio = last.value / median;
-      creatorOutlier = available(
-        Math.log10(Math.max(ratio, 1)) / Math.log10(config.creatorOutlierReferenceRatio),
-        w.creatorOutlier,
-        'canonical',
-        {
-          metric: growthMetric,
-          current: last.value,
-          baselineMedian: median,
-          ratio: round(ratio, 3),
-          sampleSize: history.length,
-        },
+    const targetHours = (last.at - input.publishedAt.getTime()) / HOUR;
+    const windowHours = Math.max(
+      config.creatorAgeWindowMinHours,
+      config.creatorAgeWindowRatio * targetHours,
+    );
+    const history = input.creator.videos;
+    const withPublish = history.filter((v) => v.publishedAt !== null);
+    const matched: { ageHours: number; value: number }[] = [];
+    for (const video of withPublish) {
+      const published = video.publishedAt?.getTime() ?? 0;
+      let best: { ageHours: number; value: number; distance: number } | null = null;
+      for (const snap of video.snapshots) {
+        if (snap.capturedAt.getTime() > asOf || !Number.isFinite(snap.value) || snap.value < 0)
+          continue;
+        const ageHours = (snap.capturedAt.getTime() - published) / HOUR;
+        const distance = Math.abs(ageHours - targetHours);
+        if (ageHours < 0 || distance > windowHours) continue;
+        if (!best || distance < best.distance) best = { ageHours, value: snap.value, distance };
+      }
+      if (best) matched.push({ ageHours: round(best.ageHours, 2), value: best.value });
+    }
+    const details = {
+      metric: growthMetric,
+      targetAgeHours: round(targetHours, 2),
+      windowHours: round(windowHours, 2),
+      creatorVideos: history.length,
+      withPublishTime: withPublish.length,
+      ageMatched: matched.length,
+    };
+    if (matched.length < config.minCreatorVideos) {
+      creatorOutlier = unavailableCreator(
+        `insufficient age-matched creator history: ${matched.length} of ${history.length} other videos have a reading within ±${round(windowHours, 1)}h of age ${round(targetHours, 1)}h (need ${config.minCreatorVideos})`,
+        details,
       );
-      if (ratio >= 3) reasons.push('CREATOR_OUTLIER');
+    } else {
+      const sorted = matched.map((m) => m.value).sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const median =
+        sorted.length % 2 ? (sorted[mid] ?? 0) : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+      if (median <= 0) {
+        creatorOutlier = unavailableCreator('age-matched creator baseline is zero', details);
+      } else {
+        const ratio = last.value / median;
+        creatorOutlier = available(
+          Math.log10(Math.max(ratio, 1)) / Math.log10(config.creatorOutlierReferenceRatio),
+          w.creatorOutlier,
+          'canonical',
+          {
+            ...details,
+            current: last.value,
+            baselineMedian: median,
+            ratio: round(ratio, 3),
+            matched,
+          },
+        );
+        if (ratio >= 3) reasons.push('CREATOR_OUTLIER');
+      }
     }
   }
 
@@ -406,6 +464,21 @@ export function scoreCandidate(
     if (engagement.available) confidence += 0.05;
     if (sources.size >= 2) confidence += 0.05;
     confidence = round(Math.min(1, confidence), 2);
+  }
+
+  // ── time-based staleness ────────────────────────────────────────────────────
+  // Freshness decays with age even without new evidence. The score is stale once
+  // freshness has dropped by `freshnessRescoreDelta`; below the floor the video is
+  // out of the useful window and no longer needs time-only rescoring.
+  let nextRescoreAt: Date | null = null;
+  const freshnessNow = 0.5 ** (ageHours / config.freshnessHalfLifeHours);
+  if (state !== 'insufficient_evidence' && freshnessNow > config.freshnessRescoreFloor + 1e-9) {
+    const target = Math.max(
+      freshnessNow - config.freshnessRescoreDelta,
+      config.freshnessRescoreFloor,
+    );
+    const ageAtTarget = config.freshnessHalfLifeHours * Math.log2(1 / target);
+    nextRescoreAt = new Date(ageFrom.getTime() + Math.ceil(ageAtTarget * HOUR));
   }
 
   let rawScore: number | null = null;
@@ -441,5 +514,7 @@ export function scoreCandidate(
     reasonCodes: [...new Set(reasons)].sort(),
     missingMetrics,
     growthMetric,
+    observations,
+    nextRescoreAt,
   };
 }

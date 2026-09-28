@@ -37,6 +37,18 @@ export function explainScore(result: ScoreResult): string[] {
     if (name === 'acceleration') extra = ` — ×${String(d['ratio'])}`;
     lines.push(`  - ${LABELS[name]}: ${c.strength} (${c.value})${extra}`);
   }
+  const fmt = (list: { source: string; observations: number }[]) =>
+    list.map((o) => `${o.source} ×${o.observations}`).join(', ');
+  const { publicPropagation, nonPropagation } = result.observations;
+  lines.push(
+    `  public propagation sources: ${publicPropagation.length ? fmt(publicPropagation) : 'none'}`,
+  );
+  if (nonPropagation.length) {
+    lines.push(`  non-propagation observations: ${fmt(nonPropagation)} (not counted as spread)`);
+  }
   if (result.reasonCodes.length) lines.push(`  reasons: ${result.reasonCodes.join(', ')}`);
+  lines.push(
+    `  next time-based rescore: ${result.nextRescoreAt ? result.nextRescoreAt.toISOString() : 'none (only on new evidence)'}`,
+  );
   return lines;
 }

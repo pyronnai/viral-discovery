@@ -288,6 +288,11 @@ export const scores = pgTable(
       onDelete: 'set null',
     }),
     computedAt: tz('computed_at').notNull().defaultNow(),
+    /**
+     * When time alone (freshness decay) makes this score stale. NULL = only new
+     * evidence triggers rescoring (insufficient evidence, or aged out).
+     */
+    nextRescoreAt: tz('next_rescore_at'),
   },
   (t) => [
     index('scores_video_id_idx').on(t.videoId),

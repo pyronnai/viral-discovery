@@ -30,6 +30,18 @@ function adapterPlatform(deps: PipelineDeps, adapterId: string): string | null {
   return deps.registry.has(adapterId) ? deps.registry.get(adapterId).manifest.platform : null;
 }
 
+/**
+ * adapter id → sighting role (manifest.sightingRole). Unknown adapters are
+ * treated as provenance: an unclassified observation must never inflate virality.
+ */
+function sightingRole(deps: PipelineDeps, adapterId: string): 'propagation' | 'provenance' {
+  const known = deps.adapterSightingRoles?.[adapterId];
+  if (known) return known;
+  return deps.registry.has(adapterId)
+    ? deps.registry.get(adapterId).manifest.sightingRole
+    : 'provenance';
+}
+
 function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -74,12 +86,14 @@ export async function loadScoringInput(
   }));
 
   const sightingRows = await deps.db
-    .select({ s: sightings, adapterId: sources.adapterId })
+    .select({ s: sightings, adapterId: sources.adapterId, sourceName: sources.name })
     .from(sightings)
     .innerJoin(sources, eq(sources.id, sightings.sourceId))
     .where(and(eq(sightings.videoId, videoId), lte(sightings.seenAt, asOf)));
-  const sightingInputs: SightingInput[] = sightingRows.map(({ s, adapterId }) => ({
+  const sightingInputs: SightingInput[] = sightingRows.map(({ s, adapterId, sourceName }) => ({
     sourceId: s.sourceId,
+    sourceLabel: sourceName,
+    role: sightingRole(deps, adapterId),
     sourcePlatform: adapterPlatform(deps, adapterId),
     observationKey: s.observationKey || s.id,
     runId: s.discoveryRunId,
@@ -89,30 +103,42 @@ export async function loadScoringInput(
 
   const growth = snapshots.some((s) => s.metrics.views != null) ? 'views' : 'likes';
 
-  // Creator history: latest growth-metric value of each OTHER video by the creator.
+  // Creator history: every OTHER video by the creator, with its publish time and
+  // growth-metric readings over time, so the scorer can age-match them.
   let creator: ScoringInput['creator'] = null;
   if (video.creatorId) {
     const others = await deps.db
-      .selectDistinctOn([metricSnapshots.videoId], {
-        videoId: metricSnapshots.videoId,
-        views: metricSnapshots.views,
-        likes: metricSnapshots.likes,
-      })
-      .from(metricSnapshots)
-      .innerJoin(videos, eq(videos.id, metricSnapshots.videoId))
-      .where(
-        and(
-          eq(videos.creatorId, video.creatorId),
-          ne(videos.id, videoId),
-          lte(metricSnapshots.capturedAt, asOf),
-        ),
-      )
-      .orderBy(metricSnapshots.videoId, desc(metricSnapshots.capturedAt));
+      .select({ id: videos.id, publishedAt: videos.publishedAt })
+      .from(videos)
+      .where(and(eq(videos.creatorId, video.creatorId), ne(videos.id, videoId)));
+    const readings =
+      others.length === 0
+        ? []
+        : await deps.db
+            .select({
+              videoId: metricSnapshots.videoId,
+              capturedAt: metricSnapshots.capturedAt,
+              views: metricSnapshots.views,
+              likes: metricSnapshots.likes,
+            })
+            .from(metricSnapshots)
+            .where(
+              and(
+                inArray(
+                  metricSnapshots.videoId,
+                  others.map((o) => o.id),
+                ),
+                lte(metricSnapshots.capturedAt, asOf),
+              ),
+            );
     creator = {
-      otherVideoValues: others.flatMap((o) => {
-        const v = growth === 'views' ? o.views : o.likes;
-        return v === null ? [] : [v];
-      }),
+      videos: others.map((o) => ({
+        publishedAt: o.publishedAt,
+        snapshots: readings.flatMap((r) => {
+          const value = growth === 'views' ? r.views : r.likes;
+          return r.videoId === o.id && value !== null ? [{ capturedAt: r.capturedAt, value }] : [];
+        }),
+      })),
     };
   }
 
@@ -197,12 +223,16 @@ export async function scoreVideo(
 
   if (!options.force) {
     const [latest] = await deps.db
-      .select({ id: scores.id, inputsHash: scores.inputsHash })
+      .select({ id: scores.id, inputsHash: scores.inputsHash, nextRescoreAt: scores.nextRescoreAt })
       .from(scores)
       .where(and(eq(scores.videoId, videoId), eq(scores.algorithmVersion, config.version)))
       .orderBy(desc(scores.computedAt))
       .limit(1);
-    if (latest?.inputsHash === inputsHash)
+    // Unchanged = same evidence AND the stored score is not yet time-stale.
+    const timeStale = latest?.nextRescoreAt
+      ? latest.nextRescoreAt.getTime() <= asOf.getTime()
+      : false;
+    if (latest?.inputsHash === inputsHash && !timeStale)
       return { videoId, status: 'unchanged', scoreId: latest.id, result };
   }
 
@@ -216,20 +246,27 @@ export async function scoreVideo(
       confidence: result.confidence,
       components: {
         ...result.components,
-        _meta: { rawScore: result.rawScore, growthMetric: result.growthMetric },
+        _meta: {
+          rawScore: result.rawScore,
+          growthMetric: result.growthMetric,
+          observations: result.observations,
+        },
       },
       missingMetrics: result.missingMetrics,
       reasonCodes: result.reasonCodes,
       inputsHash,
       basedOnSnapshotId: latestSnapshotId,
       computedAt: asOf,
+      nextRescoreAt: result.nextRescoreAt,
     })
     .returning({ id: scores.id });
   return { videoId, status: 'created', scoreId: row?.id ?? null, result };
 }
 
 export type RescoreScope =
-  | { kind: 'stale' } // no score yet, or new snapshots/sightings since the last score
+  // no score yet, new snapshots/sightings since the last score, or the latest
+  // score's time-sensitive components are due (scores.next_rescore_at <= now)
+  | { kind: 'stale' }
   | { kind: 'unscored' }
   | { kind: 'recent'; hours: number }
   | { kind: 'videos'; videoIds: string[] };
@@ -266,6 +303,7 @@ export async function selectForScoring(
         sql`${lastScore} is null`,
         sql`exists (select 1 from ${metricSnapshots} where ${metricSnapshots.videoId} = ${videos.id} and ${metricSnapshots.capturedAt} > ${lastScore})`,
         sql`exists (select 1 from ${sightings} where ${sightings.videoId} = ${videos.id} and ${sightings.seenAt} > ${lastScore})`,
+        sql`(select ${scores.nextRescoreAt} from ${scores} where ${scores.videoId} = ${videos.id} and ${scores.algorithmVersion} = ${version} order by ${scores.computedAt} desc limit 1) <= ${now}`,
       ),
     );
   }

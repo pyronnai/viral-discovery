@@ -19,9 +19,25 @@ export function evidenceFingerprint(input: ScoringInput, config: ScoringConfig):
       .sort((a, b) => a.at.localeCompare(b.at)),
     sightings: input.sightings
       .filter((s) => s.seenAt.getTime() <= asOf)
-      .map((s) => [s.sourceId, s.observationKey, s.seenAt.toISOString(), s.sourceEngagement])
+      .map((s) => [
+        s.sourceId,
+        s.role,
+        s.observationKey,
+        s.seenAt.toISOString(),
+        s.sourceEngagement,
+      ])
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-    creator: input.creator ? [...input.creator.otherVideoValues].sort((a, b) => a - b) : null,
+    creator: input.creator
+      ? input.creator.videos
+          .map((v) => ({
+            publishedAt: v.publishedAt?.toISOString() ?? null,
+            snapshots: v.snapshots
+              .filter((x) => x.capturedAt.getTime() <= asOf)
+              .map((x) => [x.capturedAt.toISOString(), x.value])
+              .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+          }))
+          .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+      : null,
   };
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
