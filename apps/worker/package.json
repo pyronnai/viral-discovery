@@ -1,0 +1,23 @@
+{
+  "name": "@vd/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "start": "tsx --env-file-if-exists=../../.env src/main.ts"
+  },
+  "dependencies": {
+    "@vd/adapter-contract": "workspace:^",
+    "@vd/config": "workspace:^",
+    "@vd/core": "workspace:^",
+    "@vd/db": "workspace:^",
+    "drizzle-orm": "^0.45.3",
+    "pg-boss": "^12.35.0"
+  },
+  "devDependencies": {
+    "pino": "^10.3.1",
+    "tsx": "^4.23.15"
+  }
+}
