@@ -6,7 +6,14 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', 'packages/db/migrations/**'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/coverage/**',
+      'packages/db/migrations/**',
+      '**/.next/**',
+      '**/next-env.d.ts',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
@@ -29,8 +36,8 @@ export default tseslint.config(
     },
   },
   {
-    // Tests may use non-null assertions on fixtures they just built.
-    files: ['**/*.test.ts'],
+    // Tests (and their fixture helpers) may use non-null assertions on rows they just built.
+    files: ['**/*.test.ts', '**/src/testing.ts'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
     },

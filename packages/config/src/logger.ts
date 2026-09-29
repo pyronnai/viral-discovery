@@ -21,6 +21,7 @@ export function createLogger(
         'DATABASE_URL',
         '*.YOUTUBE_API_KEY',
         '*.TWITCH_CLIENT_SECRET',
+        '*.ANTHROPIC_API_KEY',
       ],
       censor: '[redacted]',
     },

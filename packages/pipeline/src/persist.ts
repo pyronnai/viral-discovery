@@ -18,7 +18,7 @@ import {
 } from '@vd/core';
 import { schema, type AnyDatabase } from '@vd/db';
 
-const { creators, videos, sightings, metricSnapshots, apiUsage } = schema;
+const { creators, videos, sightings, metricSnapshots, apiUsage, clusters } = schema;
 
 type Tx = Parameters<Parameters<AnyDatabase['transaction']>[0]>[0];
 export type Executor = AnyDatabase | Tx;
@@ -69,7 +69,7 @@ export async function upsertVideo(
   db: Executor,
   video: NormalizedVideo,
   options: { authoritative: boolean; creatorId: string | null; raw: RawItem },
-): Promise<{ id: string; inserted: boolean }> {
+): Promise<{ id: string; clusterId: string | null; inserted: boolean }> {
   const { authoritative, creatorId, raw } = options;
   const keep = (column: AnyColumn) => merge(column, authoritative);
   const [row] = await db
@@ -121,9 +121,32 @@ export async function upsertVideo(
       },
     })
     // xmax = 0 only for a freshly inserted row version.
-    .returning({ id: videos.id, inserted: sql<boolean>`(xmax = 0)` });
+    .returning({
+      id: videos.id,
+      clusterId: videos.clusterId,
+      inserted: sql<boolean>`(xmax = 0)`,
+    });
   if (!row) throw new Error('video upsert returned no row');
   return row;
+}
+
+/**
+ * Every video belongs to a cluster (review and classification are per cluster).
+ * Until near-duplicate detection exists, a new video gets a singleton cluster.
+ */
+export async function ensureCluster(
+  db: Executor,
+  videoId: string,
+  clusterId: string | null,
+): Promise<string> {
+  if (clusterId) return clusterId;
+  const [cluster] = await db
+    .insert(clusters)
+    .values({ representativeVideoId: videoId })
+    .returning({ id: clusters.id });
+  if (!cluster) throw new Error('cluster insert returned no row');
+  await db.update(videos).set({ clusterId: cluster.id }).where(eq(videos.id, videoId));
+  return cluster.id;
 }
 
 export async function insertSighting(

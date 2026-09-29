@@ -1,0 +1,23 @@
+{
+  "name": "@vd/review",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vd/classification": "workspace:^",
+    "@vd/core": "workspace:^",
+    "@vd/db": "workspace:^",
+    "@vd/scoring": "workspace:^",
+    "drizzle-orm": "^0.45.3"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "vitest": "^5.0.2"
+  }
+}

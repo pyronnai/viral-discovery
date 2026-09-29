@@ -306,6 +306,17 @@ export const scores = pgTable(
 );
 
 // ── classification & review ───────────────────────────────────────────────
+export interface ClassificationSafetyFlag {
+  flag: string;
+  confidence: number;
+  note: string;
+}
+
+/**
+ * Content classifications of a cluster (history is kept; the latest row for the
+ * current taxonomy + prompt version is the effective one). Labels, flags, and
+ * analysis are model-generated hypotheses, separate from deterministic scores.
+ */
 export const classifications = pgTable(
   'classifications',
   {
@@ -313,15 +324,61 @@ export const classifications = pgTable(
     clusterId: uuid('cluster_id')
       .notNull()
       .references(() => clusters.id, { onDelete: 'cascade' }),
+    /** The representative video whose inputs were classified. */
+    videoId: uuid('video_id').references(() => videos.id, { onDelete: 'set null' }),
     taxonomyVersion: text('taxonomy_version').notNull(),
+    provider: text('provider').notNull().default('unknown'),
+    /** The model that actually produced the output. */
     model: text('model').notNull(),
     promptVersion: text('prompt_version').notNull(),
     labels: jsonb('labels').$type<ClassificationLabel[]>().notNull().default([]),
-    safetyFlags: jsonb('safety_flags').$type<string[]>().notNull().default([]),
+    safetyFlags: jsonb('safety_flags').$type<ClassificationSafetyFlag[]>().notNull().default([]),
+    /** One-sentence neutral summary of what the video appears to show. */
     rationale: text('rationale'),
+    /** "Why this may work" hypotheses (hook, payoff, …). Never facts. */
+    analysis: jsonb('analysis').$type<Record<string, string | null>>().notNull().default({}),
+    /** Which inputs were available/used (title, caption, thumbnail used|unavailable|none, …). */
+    inputsUsed: jsonb('inputs_used').$type<Record<string, unknown>>().notNull().default({}),
+    /** Fingerprint of the content inputs; a change makes the cluster eligible again. */
+    inputHash: text('input_hash').notNull().default(''),
     createdAt: createdAt(),
   },
-  (t) => [index('classifications_cluster_id_idx').on(t.clusterId)],
+  (t) => [
+    index('classifications_cluster_id_idx').on(t.clusterId),
+    index('classifications_cluster_version_idx').on(
+      t.clusterId,
+      t.taxonomyVersion,
+      t.promptVersion,
+      t.createdAt,
+    ),
+  ],
+);
+
+/**
+ * Failed classification attempts (invalid output, refusal, provider errors).
+ * Invalid model output is never written to `classifications`; it is quarantined here
+ * as an error summary (no raw model response).
+ */
+export const classificationFailures = pgTable(
+  'classification_failures',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clusterId: uuid('cluster_id')
+      .notNull()
+      .references(() => clusters.id, { onDelete: 'cascade' }),
+    videoId: uuid('video_id').references(() => videos.id, { onDelete: 'set null' }),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    taxonomyVersion: text('taxonomy_version').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    inputHash: text('input_hash').notNull(),
+    errorKind: text('error_kind').notNull(),
+    error: text('error').notNull(),
+    details: jsonb('details').$type<string[]>().notNull().default([]),
+    retryable: boolean('retryable').notNull().default(false),
+    attemptedAt: tz('attempted_at').notNull().defaultNow(),
+  },
+  (t) => [index('classification_failures_cluster_idx').on(t.clusterId, t.attemptedAt)],
 );
 
 export const reviewEvents = pgTable(
@@ -393,6 +450,7 @@ export const ALL_TABLES = {
   metricSnapshots,
   scores,
   classifications,
+  classificationFailures,
   reviewEvents,
   rights,
   apiUsage,

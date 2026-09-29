@@ -1,6 +1,6 @@
 # Architecture
 
-_Status: Phase 3 (breakout discovery + virality scoring v1). Last updated 2026-09-29._
+_Status: Phase 4 (content understanding + human review dashboard). Last updated 2026-09-29._
 
 ## Purpose
 
@@ -328,6 +328,125 @@ roughly every 3–4 h for a 1-day-old video, less often as it ages, then never.
 - **Versioning:** every tunable lives in `ScoringConfig`; changing one requires a new
   `version`. Scores of different versions are never mixed in populations.
 
+## Content understanding (Phase 4)
+
+Two separate questions, never mixed:
+
+|                    | Virality score (`@vd/scoring`)                         | Content analysis (`@vd/classification`)                                                         |
+| ------------------ | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Question           | How strongly does the **data** show breakout behavior? | **What** is this, and why might it appeal?                                                      |
+| Method             | Deterministic formula over metrics and sightings       | Model-generated (LLM) from metadata + thumbnail                                                 |
+| Nature             | Measurement (with confidence/state)                    | **Hypotheses / interpretations**, labeled "AI content analysis"                                 |
+| Affects the other? | No                                                     | No — classification never changes the score, and a score change never triggers reclassification |
+
+### Pipeline
+
+`classify --eligible` / `classify-cluster` job → build input from stored data → provider →
+Zod validation → store (or quarantine) → dashboard.
+
+- **Unit:** the cluster (via its representative video). Clusters are currently singletons
+  (exact identity; see "Cluster-level review").
+- **Inputs (permitted only):** platform, canonical URL, title, caption, duration, publish
+  time, creator display name/handle, short discovery-context descriptors (e.g.
+  `bluesky: search "funny"`), and the thumbnail **URL**, which the provider fetches itself.
+  No video download, no frame extraction, no media proxying. If the provider cannot use
+  the thumbnail, classification retries text-only and records `inputsUsed.thumbnail =
+"unavailable"`; `"none"` when no HTTPS thumbnail exists.
+- **Output** (validated with Zod, schema-constrained generation where supported):
+  `summary`, multi-label `labels[{label, confidence}]`, `safetyFlags[{flag, confidence,
+note}]`, and `analysis` (hook, setup, payoff, emotionalDriver, novelty, pacingNotes,
+  audienceAppeal, reusableFormat, suggestedTheme, whyItMayWork — each nullable).
+- **Invalid output** (schema or product rules: unknown label, no labels, duplicates,
+  "other" mixed with specific labels, confidence outside 0–1) is **never stored** as a
+  classification; the attempt is recorded in `classification_failures` (kind, message,
+  details — no raw model response). Refusals and truncation are distinct kinds.
+
+### Taxonomy (`content-taxonomy-v1`) and prompt (`content-prompt-v1`)
+
+Labels (multi-label): funny, fails, animals, reactions, memes, unexpected, wholesome, prank,
+gaming, sports, other. Review flags: serious_injury, violence, minors, sexual_or_nsfw,
+tragedy_or_death, dangerous_behavior, potentially_distressing. Flags describe cues for a
+human reviewer; the prompt forbids claims about legality or the identity/character of real
+people. **Flagged candidates are never removed** — the dashboard highlights significant
+flags. Changing labels/definitions bumps the taxonomy version; changing the prompt bumps
+the prompt version; either makes every cluster eligible for reclassification.
+
+### Provider abstraction
+
+`ContentClassifier { provider, model, classify(input) }`. Providers are thin transports;
+a shared layer (`classifierFromTransport`) owns thumbnail→text fallback, refusal/truncation
+handling, and validation, so every provider behaves identically. Stored rows are
+provider-neutral: `provider`, `model` (the model that actually answered), `taxonomy_version`,
+`prompt_version`, `created_at` (classified at), `inputs_used`, `input_hash`.
+
+- **Anthropic** (first implementation): Messages API with structured output
+  (`output_config.format` JSON schema from the Zod schema), `effort: low`, server-side
+  refusal fallbacks (`fallbacks: "default"`), stable cached system prompt, typed SDK errors
+  mapped to `rate_limited` / `provider_error` (retryable or not). Default model
+  `claude-opus-5-5` (`CLASSIFIER_MODEL` to change).
+- **Fake** (tests/local): deterministic, same shared layer.
+- **Unconfigured:** `createClassifier()` returns a reason, never a stand-in. The dashboard
+  shows "Unclassified"; `classify` fails clearly; the worker job completes as a no-op.
+
+### Classification gate (don't spend calls on low-value candidates)
+
+A cluster is **eligible** when (latest representative score for the current scoring version is
+`scored`/`provisional` and ≥ `CLASSIFICATION_MIN_SCORE`, default 60) **or** its current review
+status is `saved`/`approved`; **and** it has no classification for the current
+taxonomy + prompt + input fingerprint; **and** fewer than 3 failures for that same input.
+`--cluster/--video` (and the dashboard's Classify/Reclassify) classify explicitly; `--force`
+ignores the idempotency check. Insufficient-evidence candidates are only classified on
+request or when saved/approved.
+
+## Human review dashboard (Phase 4)
+
+`apps/web` — Next.js 16 (App Router, React 19, Turbopack), **internal, single-user**. Pages are
+server-rendered from Postgres via `@vd/review` (feed/detail queries, actions, presenters); it
+needs only `DATABASE_URL` — no source-API or model credentials to render stored data.
+
+| Route                     | What                                                                                                                                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                       | Summary buckets (🔥 breaking out ≥ 70, 👀 unreviewed, ⭐ saved, ✅ approved, ⛔ rejected, ❔ insufficient evidence, ⚠ flagged) + filters + ranked feed of cluster cards, cursor-paginated (25/page)                                               |
+| `/candidates/[clusterId]` | Detail: larger thumbnail, canonical metadata, Open original, score breakdown + history, metrics table + inline SVG growth chart, AI content analysis (+ Classify/Reclassify), rights (history + manual edit), review history, sightings with role |
+| `/login`                  | Only when `DASHBOARD_ACCESS_TOKEN` is set: a minimal access gate (`src/proxy.ts`), hashed httpOnly cookie, constant-time compare. Not a user system.                                                                                              |
+
+- **Feed query:** one SQL statement per page over clusters (representative video) with
+  `LATERAL` joins for the latest score (current algorithm), latest review event, latest rights
+  record, latest classification + failure (current taxonomy/prompt), latest snapshot, version
+  count, and per-source observation counts — no N+1; heavy histories load only on the detail page.
+- **Ordering:** scored → provisional → insufficient evidence → not scored; then latest score
+  (NULL never treated as zero), then recency (published, else first discovered), then id.
+  **Keyset cursor** on exactly that order (malformed cursors fall back to page 1).
+- **Filters (URL params, shareable):** `review` (incl. `unreviewed`), `label`, `platform`,
+  `source`, `state` (incl. `unscored`), `minScore`, `within` (hours since discovery),
+  `rights`, `flagged`. Unknown values are ignored.
+- **Cards:** thumbnail (loaded straight from the platform CDN, `referrerPolicy=no-referrer`,
+  broken images degrade to a placeholder) | platform, creator, age (`*` = from discovery),
+  title, labels or **Unclassified** / **Classification failed**, significant flags, latest
+  metrics, rights | virality badge with **SCORED / PROVISIONAL / INSUFFICIENT EVIDENCE**
+  and confidence (a missing score shows "—") | review buttons + Open original. "Details / Why?"
+  expands: CANONICAL / DISCOVERED VIA (public propagation) / MANUAL / PROVENANCE, component
+  breakdown (unavailable components say so, with the reason), AI summary.
+- **Public propagation vs provenance** in the UI comes from the same adapter-declared
+  `sightingRole` as scoring (`splitSources`); unknown adapters render as provenance.
+- **No media handling:** no proxying, downloading, or embeds; "Open original" links to the
+  canonical URL.
+
+### Review workflow (cluster-level)
+
+- Decisions: **Approved** (worth progressing — never publishes anything), **Saved**,
+  **Rejected**, **Already used**. Each click appends a `review_events` row for the **cluster**;
+  the latest event is the effective status; history is shown on the detail page. Repeating the
+  current decision with the same note is a no-op (idempotent). Optional note (≤ 500 chars).
+- The UI updates optimistically and reverts with an error message if the server action fails.
+- **Rights are separate:** unknown / requested / granted / denied / own_content, appended to the
+  `rights` history per cluster (holder, evidence URL, notes). "Approved + rights unknown" is a
+  valid, visible state. No outreach or rights-request automation.
+- **Clusters:** every video belongs to one (singleton clusters, exact identity only; backfilled
+  in migration 0004). A cluster shows one card (its representative), a version count, and all
+  sightings; one decision covers all versions. Near-duplicate clustering is not implemented —
+  the detail page says so.
+
 ## Content origin vs rights
 
 Two separate concepts, deliberately:
@@ -345,15 +464,19 @@ Discovery never implies permission. Any future reuse feature must check `rights`
 ## Jobs and scheduling
 
 pg-boss (in its own schema in the same Postgres). The worker idempotently creates the
-five queues on boot and, since Phase 3, registers handlers for three of them:
+five queues on boot and registers handlers for four of them (three since Phase 3,
+`classify-cluster` since Phase 4):
 
-| Job               | Handler                                        | Idempotency                                              |
-| ----------------- | ---------------------------------------------- | -------------------------------------------------------- |
-| `discover-source` | `runSourceQuery` for the stored query          | videos upsert; sightings unique per run                  |
-| `refresh-metrics` | `refreshMetrics` grouped by canonical platform | snapshots unique per (video, captured_at)                |
-| `score-video`     | `scoreVideo` (current algorithm only)          | a row is stored only if the evidence fingerprint changed |
+| Job                | Handler                                        | Idempotency                                                               |
+| ------------------ | ---------------------------------------------- | ------------------------------------------------------------------------- |
+| `discover-source`  | `runSourceQuery` for the stored query          | videos upsert; sightings unique per run                                   |
+| `refresh-metrics`  | `refreshMetrics` grouped by canonical platform | snapshots unique per (video, captured_at)                                 |
+| `score-video`      | `scoreVideo` (current algorithm only)          | a row is stored only if the evidence fingerprint changed                  |
+| `classify-cluster` | `classifyCluster` (current taxonomy + prompt)  | a row only for new (versions, input fingerprint); no-op when unconfigured |
 
-`normalize-item` and `classify-cluster` stay handler-less. The worker still creates **no
+`classify-cluster` (Phase 4) classifies one cluster: idempotent (versions + input fingerprint),
+throws only for retryable provider failures so pg-boss retries, and completes as a no-op with a
+warning when no classifier is configured. `normalize-item` stays handler-less. The worker still creates **no
 pg-boss schedules**: `pnpm cli tick` (cron-friendly) runs one pass of
 `discover-due` → `refresh-metrics --due` (every platform with a `metrics.refresh`
 adapter) → `rescore` (stale only).
@@ -444,3 +567,15 @@ LLM classification, dashboard, compilation planning (later phases).
    stops below a floor.
 4. **Algorithm version `breakout-v1.1`**; weights and fallback constants unchanged (not
    recalibrated against hand-written examples).
+
+## Decisions (Phase 4)
+
+1. **Content analysis is separate from virality**: classification never feeds the score, and a
+   score change never triggers reclassification (only content inputs or versions do).
+2. **Provider-neutral classification** behind `ContentClassifier`; Anthropic first; invalid
+   output quarantined in `classification_failures`, never stored as a classification.
+3. **Classification gate** (score ≥ `CLASSIFICATION_MIN_SCORE`, or saved/approved) plus explicit
+   Classify/Reclassify; idempotent per (taxonomy, prompt, input fingerprint).
+4. **Review and rights are append-only, cluster-level histories**; approval ≠ rights.
+5. **Singleton clusters** until near-duplicate detection exists (honestly labeled).
+6. **Server-rendered internal dashboard** reading `@vd/review`; optional token gate only.

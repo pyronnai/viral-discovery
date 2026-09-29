@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import type { CommandIO } from '../output.ts';
 import { registerAdapters } from './adapters.ts';
+import { registerClassify } from './classify.ts';
 import { registerConfigCheck } from './config-check.ts';
 import { registerDbCheck } from './db-check.ts';
 import { registerDiscover } from './discover.ts';
@@ -26,4 +27,5 @@ export const COMMANDS: readonly CommandRegistrar[] = [
   registerRefreshMetrics,
   registerQueries,
   registerScheduling,
+  registerClassify,
 ];

@@ -4,11 +4,10 @@ Viral/funny short-form video **intelligence** agent: discover → normalize → 
 track engagement → score → categorize → human review. Links to and analyzes public
 metadata only; never downloads third-party media.
 
-**Status: Phase 3 — breakout discovery + virality scoring v1.** Adapters for YouTube
-(charts, targeted search, seed channels), Twitch, Bluesky (incl. TikTok short links), and
-manual URLs store normalized videos, cross-source sightings, and metric snapshots; a refresh
-ladder measures growth and a deterministic breakout score ranks candidates with an
-explained, confidence-labeled breakdown. No LLM classification or UI yet.
+**Status: Phase 4 — content understanding + human review dashboard.** Multi-source
+discovery (YouTube, Twitch, Bluesky, manual URLs incl. TikTok), a deterministic breakout
+score, model-based content classification (labels, review flags, "why this may work"
+hypotheses), and a server-rendered review dashboard with cluster-level decisions.
 See [`docs/architecture.md`](docs/architecture.md) and [`docs/sources/`](docs/sources/).
 
 ## Requirements
@@ -57,6 +56,14 @@ pnpm cli refresh-metrics youtube --due --ladder 2h,8h,24h,72h
 pnpm cli rescore --explain             # stale only by default; --unscored / --recent 24 / --video <id>
 ```
 
+## Review dashboard
+
+```bash
+pnpm --filter @vd/web dev        # http://localhost:3000 (reads the root .env)
+pnpm --filter @vd/web build      # production build
+pnpm cli classify --eligible     # needs ANTHROPIC_API_KEY; the dashboard works without it
+```
+
 Scores are `scored`, `provisional`, or `insufficient_evidence` (no value); see
 "Virality / breakout scoring v1" in [`docs/architecture.md`](docs/architecture.md).
 
@@ -87,6 +94,9 @@ packages/config              env validation (Zod) + logger (Pino)
 packages/core                domain types, metric model, job contracts
 packages/db                  Drizzle schema, migrations, health check
 packages/url-identity        URL → canonical (platform, video id, URL)
+apps/web                     Next.js review dashboard (internal, single-user)
+packages/review              feed/detail queries, review + rights actions, view models
+packages/classification      content classifier (provider abstraction, taxonomy, Zod-validated output)
 packages/url-resolution      allowlisted TikTok short-link expansion (network)
 packages/scoring             pure, deterministic breakout score v1
 packages/pipeline            ingestion, submission, refresh ladder, scheduling, score lifecycle

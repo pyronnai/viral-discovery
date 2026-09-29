@@ -11,6 +11,7 @@
   "dependencies": {
     "@vd/adapter-contract": "workspace:^",
     "@vd/adapter-wiring": "workspace:^",
+    "@vd/classification": "workspace:^",
     "@vd/config": "workspace:^",
     "@vd/core": "workspace:^",
     "@vd/db": "workspace:^",

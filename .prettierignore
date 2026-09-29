@@ -3,3 +3,5 @@ pnpm-lock.yaml
 packages/db/migrations/meta
 coverage
 dist
+.next
+next-env.d.ts

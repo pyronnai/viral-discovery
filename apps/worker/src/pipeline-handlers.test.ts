@@ -34,14 +34,19 @@ async function run(impl: PipelineImpl, name: string, data: unknown) {
 }
 
 describe('pipeline job handlers', () => {
-  it('registers discover-source, refresh-metrics, and score-video', async () => {
+  it('registers classify-cluster, discover-source, refresh-metrics, and score-video', async () => {
     const work = vi.fn(() => Promise.resolve('w'));
     const names = await registerHandlers(
       { work } as never,
       pipelineHandlers(deps, fakeImpl()),
       logger,
     );
-    expect(names.sort()).toEqual(['discover-source', 'refresh-metrics', 'score-video']);
+    expect(names.sort()).toEqual([
+      'classify-cluster',
+      'discover-source',
+      'refresh-metrics',
+      'score-video',
+    ]);
   });
 
   it('runs the stored query for discover-source', async () => {

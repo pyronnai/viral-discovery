@@ -1,12 +1,18 @@
 import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { createLogger, loadConfig, redactDatabaseUrl } from '@vd/config';
 import { createDb } from './client.ts';
 import { MIGRATIONS_SCHEMA, MIGRATIONS_TABLE } from './health.ts';
 
-export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../migrations', import.meta.url));
+// path.resolve rather than `new URL('../migrations', import.meta.url)`: bundlers
+// (e.g. the web app's Turbopack build) treat the latter as an asset import.
+export const MIGRATIONS_FOLDER = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'migrations',
+);
 
 export async function runMigrations(url: string): Promise<void> {
   const handle = createDb({ url, poolMax: 1, applicationName: 'viral-discovery-migrate' });

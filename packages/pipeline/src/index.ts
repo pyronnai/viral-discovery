@@ -39,3 +39,17 @@ export {
   type ScoreVideoResult,
 } from './score.ts';
 export { dueQueries, runDueQueries, type DueQuery } from './schedule.ts';
+export {
+  classifyCluster,
+  classifyClusters,
+  classifyEligible,
+  selectClassificationCandidates,
+  buildClassificationInput,
+  clustersOfVideos,
+  latestClassification,
+  describeContext,
+  DEFAULT_CLASSIFICATION_POLICY,
+  type ClassificationPolicy,
+  type ClassifyClusterResult,
+  type ClassifySummary,
+} from './classify.ts';

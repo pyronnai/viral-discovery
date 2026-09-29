@@ -1,0 +1,31 @@
+{
+  "name": "@vd/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {},
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env node_modules/next/dist/bin/next dev",
+    "build": "next build",
+    "start": "node --env-file-if-exists=../../.env node_modules/next/dist/bin/next start",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vd/adapter-wiring": "workspace:^",
+    "@vd/classification": "workspace:^",
+    "@vd/config": "workspace:^",
+    "@vd/core": "workspace:^",
+    "@vd/db": "workspace:^",
+    "@vd/pipeline": "workspace:^",
+    "@vd/review": "workspace:^",
+    "@vd/scoring": "workspace:^",
+    "next": "16.3.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "vitest": "^5.0.2"
+  }
+}

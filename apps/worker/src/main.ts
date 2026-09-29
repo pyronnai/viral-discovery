@@ -1,5 +1,6 @@
 import { ConfigError, createLogger, loadConfig } from '@vd/config';
 import { buildAdapterRegistry as wire } from '@vd/adapter-wiring';
+import { createClassifier } from '@vd/classification';
 import { createDb } from '@vd/db';
 import { pipelineHandlers } from './pipeline-handlers.ts';
 import { startWorker } from './worker.ts';
@@ -28,13 +29,17 @@ async function main(): Promise<void> {
     config,
     logger,
     registry: wired.registry,
-    handlers: pipelineHandlers({
-      db: pipelineDb.db,
-      registry: wired.registry,
-      logger,
-      adapterPlatforms: wired.platforms,
-      adapterSightingRoles: wired.sightingRoles,
-    }),
+    handlers: pipelineHandlers(
+      {
+        db: pipelineDb.db,
+        registry: wired.registry,
+        logger,
+        adapterPlatforms: wired.platforms,
+        adapterSightingRoles: wired.sightingRoles,
+      },
+      undefined,
+      { classifier: createClassifier(config) },
+    ),
   }).catch(async (err: unknown) => {
     await pipelineDb.close();
     throw err;

@@ -32,10 +32,34 @@ export const EnvSchema = z.object({
   TWITCH_CLIENT_SECRET: z.string().min(1).optional(),
   /** Unauthenticated Bluesky AppView host. Defaults to https://api.bsky.app. */
   BLUESKY_APPVIEW_URL: z.url({ protocol: /^https$/ }).optional(),
+
+  // ── content classification (optional; dashboard works without it) ─────────
+  /** Default: "anthropic" when ANTHROPIC_API_KEY is set, otherwise "none". */
+  CLASSIFIER_PROVIDER: z.enum(['anthropic', 'none']).optional(),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  /** Model id for the classifier (default claude-opus-5-5). */
+  CLASSIFIER_MODEL: z.string().min(1).optional(),
+  /** Virality score at or above which scored/provisional candidates are classified. */
+  CLASSIFICATION_MIN_SCORE: z.coerce.number().min(0).max(100).default(60),
+
+  // ── web dashboard ─────────────────────────────────────────────────────────
+  /**
+   * Optional access gate for the internal dashboard. When set, every page asks for
+   * this token once (stored as a hashed, httpOnly cookie). Use ≥ 16 random chars.
+   */
+  DASHBOARD_ACCESS_TOKEN: z
+    .string()
+    .min(16, 'DASHBOARD_ACCESS_TOKEN must be at least 16 characters')
+    .optional(),
 });
 
 /** Names of variables that hold secrets. Never print their values. */
-export const SECRET_ENV_KEYS = ['YOUTUBE_API_KEY', 'TWITCH_CLIENT_SECRET'] as const;
+export const SECRET_ENV_KEYS = [
+  'YOUTUBE_API_KEY',
+  'TWITCH_CLIENT_SECRET',
+  'ANTHROPIC_API_KEY',
+  'DASHBOARD_ACCESS_TOKEN',
+] as const;
 
 export type AppConfig = z.infer<typeof EnvSchema>;
 

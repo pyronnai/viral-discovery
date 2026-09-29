@@ -155,8 +155,11 @@ export interface Classification {
   model: string;
   promptVersion: string;
   labels: ClassificationLabel[];
-  safetyFlags: string[];
+  safetyFlags: { flag: string; confidence: number; note: string }[];
+  /** One-sentence summary of what the video appears to show. */
   rationale: string | null;
+  /** "Why this may work" hypotheses. */
+  analysis: Record<string, string | null>;
   createdAt: Date;
 }
 

@@ -26,6 +26,7 @@ describe('cli program', () => {
     const names = buildProgram({ out: () => {}, err: () => {} }).commands.map((c) => c.name());
     expect(names.sort()).toEqual([
       'adapters',
+      'classify',
       'config-check',
       'db-check',
       'discover',
@@ -37,6 +38,29 @@ describe('cli program', () => {
       'submit-url',
       'tick',
     ]);
+  });
+});
+
+describe('classify', () => {
+  it('fails clearly without a classifier and never prints the key', async () => {
+    const h = harness();
+    await h.run('classify', '--eligible', '--json');
+    expect(JSON.parse(h.out.join('\n'))).toEqual({
+      ok: false,
+      error: {
+        kind: 'CliError',
+        message:
+          'classifier unavailable: no classifier configured (set ANTHROPIC_API_KEY, or CLASSIFIER_PROVIDER=anthropic)',
+      },
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('rejects mixing --eligible with explicit ids', async () => {
+    const h = harness({ ANTHROPIC_API_KEY: 'sk-secret-value' });
+    await h.run('classify', '--eligible', '--cluster', 'x');
+    expect(h.err.join('\n')).toBe('✖ use either --eligible or --cluster/--video');
+    expect([...h.out, ...h.err].join('\n')).not.toContain('sk-secret-value');
   });
 });
 

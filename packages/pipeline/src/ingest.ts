@@ -16,6 +16,7 @@ import type { Logger } from '@vd/config';
 import type { DiscoveryRunStatus, DiscoveryRunTrigger, SourceQueryKind } from '@vd/core';
 import { schema, type AnyDatabase } from '@vd/db';
 import {
+  ensureCluster,
   insertSighting,
   insertSnapshot,
   recordApiUsage,
@@ -115,6 +116,7 @@ async function ingestOne(
   return db.transaction(async (tx) => {
     const creatorId = video.creator ? await upsertCreator(tx, video.creator, authoritative) : null;
     const row = await upsertVideo(tx, video, { authoritative, creatorId, raw });
+    await ensureCluster(tx, row.id, row.clusterId);
     const sighting = args.writeSighting
       ? await insertSighting(tx, { videoId: row.id, sourceId: source.id, runId, raw })
       : false;

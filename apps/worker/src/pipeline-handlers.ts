@@ -8,6 +8,8 @@ import {
   type PipelineDeps,
 } from '@vd/pipeline';
 import { DEFAULT_SCORING_CONFIG } from '@vd/scoring';
+import type { ClassifierSetup } from '@vd/classification';
+import { classifyClusterHandler } from './classify-handler.ts';
 import type { JobHandlerMap } from './handlers.ts';
 
 /** Pipeline functions, injectable so handler wiring can be tested without a database. */
@@ -38,9 +40,13 @@ const DEFAULT_IMPL: PipelineImpl = { runSourceQuery, refreshMetrics, scoreVideo,
 export function pipelineHandlers(
   deps: PipelineDeps,
   impl: PipelineImpl = DEFAULT_IMPL,
-  options: { discoveryLimit?: number } = {},
+  options: { discoveryLimit?: number; classifier?: ClassifierSetup } = {},
 ): JobHandlerMap {
   return {
+    'classify-cluster': classifyClusterHandler(
+      deps,
+      options.classifier ?? { configured: false, reason: 'no classifier configured' },
+    ),
     'discover-source': async (payload, { logger }) => {
       const run = await impl.runSourceQuery(deps, payload.sourceQueryId, {
         limit: options.discoveryLimit ?? 100,
