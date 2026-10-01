@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ACCESS_COOKIE, safeNext, sameDigest, sha256Hex, tokenMatches } from './access.ts';
-import { feedHref, hasFilters, parseFilters } from './filters.ts';
+import { effectiveView, feedHref, hasFilters, parseFilters, parseSort } from './filters.ts';
 
 describe('feed filters <-> URL', () => {
   it('parses known values and ignores malformed ones', () => {
@@ -61,5 +61,21 @@ describe('access gate helpers', () => {
     expect(safeNext('//evil.example')).toBe('/');
     expect(safeNext('https://evil.example')).toBe('/');
     expect(safeNext(null)).toBe('/');
+  });
+});
+
+describe('inbox views, sorts and creator in the URL', () => {
+  it('defaults to Viral Now and round-trips view, sort and creator', () => {
+    expect(effectiveView(parseFilters({}))).toBe('viral');
+    expect(effectiveView(parseFilters({ view: 'saved' }))).toBe('saved');
+    expect(effectiveView(parseFilters({ view: 'published' }))).toBe('viral');
+    expect(parseSort({ sort: 'views' })).toBe('views');
+    expect(parseSort({ sort: 'random' })).toBe('virality');
+    const f = parseFilters({ view: 'obtained', creator: '@Fixture Pets', label: 'funny' });
+    expect(f).toMatchObject({ view: 'obtained', creator: '@Fixture Pets', label: 'funny' });
+    expect(feedHref(f, null, 'growth')).toBe(
+      '/?view=obtained&label=funny&creator=%40Fixture+Pets&sort=growth',
+    );
+    expect(hasFilters({ view: 'saved' })).toBe(false);
   });
 });

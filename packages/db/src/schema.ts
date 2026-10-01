@@ -29,6 +29,7 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import {
+  ACQUISITION_STATUSES,
   CONTENT_ORIGINS,
   DISCOVERY_RUN_STATUSES,
   DUPLICATE_STATUSES,
@@ -53,6 +54,7 @@ export const sourceQueryKindEnum = pgEnum('source_query_kind', SOURCE_QUERY_KIND
 export const videoAvailabilityEnum = pgEnum('video_availability', VIDEO_AVAILABILITIES);
 export const scoreStateEnum = pgEnum('score_state', SCORE_STATES);
 export const duplicateStatusEnum = pgEnum('duplicate_status', DUPLICATE_STATUSES);
+export const acquisitionStatusEnum = pgEnum('acquisition_status', ACQUISITION_STATUSES);
 
 const tz = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const createdAt = () => tz('created_at').notNull().defaultNow();
@@ -459,6 +461,55 @@ export const rights = pgTable(
   (t) => [index('rights_cluster_id_idx').on(t.clusterId)],
 );
 
+// ── acquisition & media availability ───────────────────────────────────────
+/**
+ * Append-only record of whether the operator obtained the source media externally
+ * (latest per cluster is current). Tracking only: nothing here downloads media.
+ */
+export const acquisitionEvents = pgTable(
+  'acquisition_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clusterId: uuid('cluster_id')
+      .notNull()
+      .references(() => clusters.id, { onDelete: 'cascade' }),
+    status: acquisitionStatusEnum('status').notNull(),
+    /** Optional: which representation it was obtained from. */
+    videoId: uuid('video_id').references(() => videos.id, { onDelete: 'set null' }),
+    note: text('note'),
+    /** Set when a cluster merge carried this record over from the absorbed cluster. */
+    originClusterId: uuid('origin_cluster_id').references((): AnyPgColumn => clusters.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('acquisition_events_cluster_idx').on(t.clusterId, t.createdAt)],
+);
+
+/**
+ * A lawful, downloadable media asset explicitly provided by an OFFICIAL/authorized
+ * API or rights holder. Empty unless such a source exists: source links ("Open
+ * original") never imply a download, and no player/CDN URL is ever extracted.
+ */
+export const mediaAssets = pgTable(
+  'media_assets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    videoId: uuid('video_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    /** e.g. 'official_download'. */
+    kind: text('kind').notNull(),
+    url: text('url').notNull(),
+    /** Who provided it (adapter id or rights holder). */
+    provider: text('provider').notNull(),
+    licenseNote: text('license_note'),
+    expiresAt: tz('expires_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [unique('media_assets_video_url_uq').on(t.videoId, t.url)],
+);
+
 // ── near-duplicates ────────────────────────────────────────────────────────
 /**
  * A detected (or human-decided) near-duplicate relationship between two videos
@@ -572,5 +623,7 @@ export const ALL_TABLES = {
   rights,
   duplicateCandidates,
   clusterMerges,
+  acquisitionEvents,
+  mediaAssets,
   apiUsage,
 } as const;

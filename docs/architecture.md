@@ -1,12 +1,18 @@
 # Architecture
 
-_Status: Phase 4 (content understanding + human review dashboard). Last updated 2026-09-29._
+_Status: Phase 5 (daily viral-video inbox). Last updated 2026-10-01._
 
 ## Purpose
 
-A viral/funny-video **intelligence** agent. It discovers public short-form videos
-through permitted access methods, tracks their engagement over time, scores and
-categorizes them, and presents the strongest candidates for human review.
+**A multi-source viral-video discovery and review inbox.** It discovers public
+short-form videos through permitted access methods, tracks their engagement over time,
+scores, classifies and deduplicates them, and presents the strongest candidates as a daily
+inbox the operator triages: save, open the original, track what was obtained and already used.
+
+**Current scope:** the system finds and prioritizes candidate content. The operator does
+editing, compilation structure, captions/hooks and publishing **externally**. Compilation
+planning, script/hook generation, editing and publishing are not part of the product (see
+"Out of scope").
 
 It **links to and analyzes** public metadata. It does **not** download, rip, or
 re-host third-party media, and it does not depend on any generative-video tool.
@@ -26,7 +32,7 @@ re-host third-party media, and it does not depend on any generative-video tool.
 | **Normalization**    | `adapter.normalize(raw)` → `NormalizedVideo`, validated by `safeNormalize()` at the boundary. Invalid items are quarantined (counted + sampled on the run), never silently dropped.          | Implemented.                                                                   |
 | **Identity**         | Map URLs/ids to the canonical `(platform, platform_video_id)` + canonical URL.                                                                                                               | `@vd/url-identity` (pure) + `@vd/url-resolution` (TikTok short links).         |
 | **Enrichment**       | Fill a referenced video from its canonical platform's adapter (`discovery.url`).                                                                                                             | For `submit-url` only. `creator.enrich` not implemented.                       |
-| **Deduplication**    | Exact: `(platform, platform_video_id)` unique. Near-duplicate: cluster by thumbnail hash + duration + title similarity into `clusters`. Review status is per cluster, so reposts inherit it. | Exact dedupe implemented. Clustering not implemented.                          |
+| **Deduplication**    | Exact: `(platform, platform_video_id)` unique. Near-duplicate: cluster by thumbnail hash + duration + title similarity into `clusters`. Review status is per cluster, so reposts inherit it. | Exact + near-duplicate clustering (Phase 4.5).                                 |
 | **Metric snapshots** | Time series of engagement readings. Every metric is explicitly a value or unavailable-with-reason.                                                                                           | Initial snapshot on ingest + refresh ladder (`refresh-metrics --due`, `tick`). |
 | **Scoring**          | Velocity/engagement/outlier/freshness score, per-platform normalized, **versioned** (`scores.algorithm_version`).                                                                            | `@vd/scoring` breakout-v1.1 + `rescore` / `score-video` job.                   |
 | **Classification**   | Multi-label categories + safety flags, **versioned** by taxonomy, model, and prompt.                                                                                                         | Table only. Not implemented.                                                   |
@@ -398,6 +404,66 @@ taxonomy + prompt + input fingerprint; **and** fewer than 3 failures for that sa
 ignores the idempotency check. Insufficient-evidence candidates are only classified on
 request or when saved/approved.
 
+## Daily viral-video inbox (Phase 5)
+
+The dashboard's main page is an inbox over clusters (one item per underlying clip; confirmed
+reposts are shown as "Also on" representations of that item, never as separate items).
+
+**Views** (`?view=`, `@vd/review` `INBOX_VIEWS`):
+
+| View              | Shows                                                                                                                       |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `viral` (default) | **Viral Now**: published (else discovered) ≤ 72 h, score state scored/provisional, no current decision, never used/rejected |
+| `unreviewed`      | no decision (any score state, incl. insufficient evidence)                                                                  |
+| `saved`           | the shortlist                                                                                                               |
+| `obtained`        | obtained externally and **not yet used**                                                                                    |
+| `used`            | already used (history)                                                                                                      |
+| `rejected`, `all` | as named                                                                                                                    |
+
+Ordering within Viral Now is the existing deterministic score (no new formula). **Sorts**
+(`?sort=`): `virality` (score state, then score — platforms without view counts still rank via
+their normalized components), `newest`, `growth` (the score's platform-normalized velocity
+component), `views`, `discovered`. Missing values are never compared as zero — rows without
+the value sort after rows with it — and every sort has its own keyset cursor.
+
+**Workflow state** — three independent ideas, deliberately not conflated:
+
+- **Saved** (`review_events.status = saved`): "I want this clip / come back to it". **Unsave**
+  appends `cleared` (no current decision) — and only when the clip is currently saved, so it can
+  never undo "already used" or "rejected".
+- **Obtained** (`acquisition_events`, append-only, latest wins): the operator obtained the source
+  media externally; `obtained_at` = that record's time, optional note and representation.
+  Tracking only — nothing is downloaded — and it never implies "used" or "published".
+- **Already used** (`review_events.status = already_used`): never surfaced as fresh again —
+  excluded from Viral Now, Unreviewed and Obtained; kept in the Used history. On a cluster merge,
+  "already used" **always wins** (it is a fact, not a judgment, so it is never a review conflict),
+  and if the absorbed side's record is the used one, a `system` event re-asserts it on the
+  survivor. "Obtained" carries over the same way. An _unconfirmed_ possible duplicate of used
+  content stays separate but is flagged on its card.
+
+**Source access vs media download.** Every candidate has a source link (canonical URL, plus each
+confirmed representation). A **download** is shown only when a `media_assets` row exists — an
+asset explicitly provided by an official/authorized API or rights holder (none of today's
+adapters provide one; the table is the extension point). Player/CDN URLs are never extracted.
+
+**Bulk actions** (`bulkApply`): save, obtained, used, reject on up to 200 selected clusters;
+merged-away ids resolve to their survivor and collapse, each item is idempotent, failures are
+reported per item. The UI confirms Used and Reject. **Export** (`/export?format=csv|json` with
+`ids=` or the current view's filters): one row per clip with title, creator, platform, canonical
+URL, alternate representation URLs, score, labels, duration, rights, review and obtained state —
+metadata and links only; CSV cells are quoted and formula-prefixed values neutralized.
+
+**Detail page** adds "Source & access" (creator/handle, platform, original URL, publication,
+duration, latest metrics, labels, score, duplicate status, rights, media availability, all
+representations) and "More from this creator" (≤ 6 other candidates by the same creator record
+or platform + handle/name).
+
+**Discovery health** (`/health`): per adapter (configured or not, with missing variable _names_)
+and per source: state (healthy / stale > 24 h / failing / never run / disabled / unconfigured),
+last success, runs/found/new in 24 h, quarantined items (`stats.invalid`), today's quota usage vs
+budget, last error; plus pipeline freshness (last score, duplicate scan, classification). Planned
+adapters (Reddit) are listed with the reason.
+
 ## Human review dashboard (Phase 4)
 
 `apps/web` — Next.js 16 (App Router, React 19, Turbopack), **internal, single-user**. Pages are
@@ -406,8 +472,10 @@ needs only `DATABASE_URL` — no source-API or model credentials to render store
 
 | Route                     | What                                                                                                                                                                                                                                              |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                       | Summary buckets (🔥 breaking out ≥ 70, 👀 unreviewed, ⭐ saved, ✅ approved, ⛔ rejected, ❔ insufficient evidence, ⚠ flagged) + filters + ranked feed of cluster cards, cursor-paginated (25/page)                                               |
+| `/`                       | **Inbox** (Phase 5): view tabs with counts (Viral Now default), category chips, filters/sort, bulk bar + export, cards (see "Daily viral-video inbox")                                                                                            |
 | `/candidates/[clusterId]` | Detail: larger thumbnail, canonical metadata, Open original, score breakdown + history, metrics table + inline SVG growth chart, AI content analysis (+ Classify/Reclassify), rights (history + manual edit), review history, sightings with role |
+| `/export`                 | CSV/JSON export of selected ids or the current view (Phase 5): metadata and links only                                                                                                                                                            |
+| `/health`                 | Discovery health (Phase 5): per-adapter/source state, recent finds, quarantined, quota, last error                                                                                                                                                |
 | `/login`                  | Only when `DASHBOARD_ACCESS_TOKEN` is set: a minimal access gate (`src/proxy.ts`), hashed httpOnly cookie, constant-time compare. Not a user system.                                                                                              |
 
 - **Feed query:** one SQL statement per page over clusters (representative video) with
@@ -532,10 +600,11 @@ platforms. Possible duplicates share nothing (review, rights, classification) un
   `merged_into_cluster_id` (old links redirect; redirects are flattened to one hop); a
   `cluster_merges` row records each side's review/rights state, what moved, the representative
   before/after, and any conflict. Nothing is deleted. Un-merging is not supported.
-- **Representative policy** (first difference wins): available › has canonical metrics › usable
-  https thumbnail › richer metadata (title, duration, publish time, creator) › earliest publish
-  time (likelier original) › earliest discovery › id. Popularity is never consulted. Feed metrics
-  and score are the representative's.
+- **Representative policy** (first difference wins): available › has a measured virality score
+  (Phase 5: whether one exists, never its size — so a merge cannot hide a cluster's evidence) ›
+  has canonical metrics › usable https thumbnail › richer metadata (title, duration, publish time,
+  creator) › earliest publish time (likelier original) › earliest discovery › id. Popularity is
+  never consulted. Feed metrics and score are the representative's.
 - **Review conflict:** both sides had a current decision and they differ (or either side was
   already in conflict) → the cluster has _no_ effective decision ("Review conflict") until a new
   decision is recorded after the merge. Same decision or one-sided → it stands.
@@ -594,32 +663,23 @@ why `videos.raw_payload` is isolated with `raw_payload_fetched_at`,
 payloads. A retention/deletion job is required **before** any source goes to
 production use.
 
-## Future: compilation planner (optional, NOT implemented)
+## Compilation planner — not planned (Phase 5 scope decision)
 
-An optional downstream feature that takes a few reviewed clips and **plans** one
-original short-form video around them: groups compatible clips by theme, suggests
-3–5 clips and an order, proposes a hook, commentary/reaction beats between clips,
-and a title/caption — carrying each clip's source URL, creator attribution, virality
-score, and **rights status / usage basis** through to the plan.
-
-Design commitments made now so it can be added later without schema rework:
-
-- Input is `clusters` with `review_events` + `rights` — both exist today.
-- A plan references clips by cluster/video id and canonical URL; it never fetches media.
-- A plan must surface any clip whose rights status is not `granted`/`own_content`
-  (or whose basis is otherwise undocumented) instead of hiding it.
-- It must work with no generative-video tool. Generation may be added someday or
-  never; nothing in this architecture depends on it.
-
-No tables, jobs, or code for the planner exist yet.
+Earlier drafts described an optional compilation planner. **As of Phase 5 it is out of scope:**
+the operator handles editing, compilation structure, captions/hooks and publishing externally,
+and takes selected clips out of the system with the metadata/link export. The useful pieces
+remain as general capabilities, not as a planner: cluster-level review and rights,
+already-used protection, and `excludeDuplicatesOfSelected` (duplicate-aware selection) in
+`@vd/dedupe`. No planner tables, jobs or code exist.
 
 ## Out of scope (by design)
 
 Downloading/ripping third-party video · extracting media URLs (e.g. Bluesky HLS
 playlists are never stored) · bypassing auth, anti-bot, DRM, paywalls · unofficial
 scraping (TikTok pages, Reddit, `bsky.app` HTML) · following TikTok short-link redirects ·
-publishing (later phase, separate service) · any specific AI-generation provider ·
-LLM classification, dashboard, compilation planning (later phases).
+publishing and social scheduling (done externally by the operator) · compilation planning,
+script/hook generation, video editing · media downloading or "download available" claims
+without an official asset · any specific AI-generation provider.
 
 ## Decisions (Phase 1)
 
@@ -698,3 +758,12 @@ LLM classification, dashboard, compilation planning (later phases).
 5. **Bounded blocking** (duration, hash bands, tokens; LIMIT per block) instead of all-pairs.
 6. **Thumbnail hashing only via an allowlisted, SSRF-hardened fetch**; failures are statuses.
 7. **Duplicate analysis never blocks discovery:** async job, and the last isolated step of `tick`.
+
+## Decisions (Phase 5)
+
+1. **Product = daily viral-video inbox**; editing/compilation/publishing happen outside.
+2. **No new scoring formula:** Viral Now = freshness window + untriaged + existing score order.
+3. **Saved, Obtained, Already used are separate**; Obtained is its own append-only history.
+4. **"Already used" dominates merges** so reposts can't make used content fresh.
+5. **Source link ≠ media download**; downloads only via an explicit official `media_assets` row.
+6. **`tick` is the production loop** (cron), now including classification; no heavy scheduler.

@@ -1,6 +1,9 @@
 import type { Command } from 'commander';
+import { createClassifier } from '@vd/classification';
 import { createThumbnailHasher, scanDuplicates, type ScanSummary } from '@vd/dedupe';
 import {
+  DEFAULT_CLASSIFICATION_POLICY,
+  classifyEligible,
   parseLadder,
   refreshDue,
   rescore,
@@ -150,8 +153,15 @@ export function registerScheduling(program: Command, io: CommandIO): void {
   program
     .command('tick')
     .description(
-      'One scheduling pass: due queries → due metric refreshes → rescore stale → duplicate analysis of new videos (run from cron)',
+      'One idempotent pass (run from cron): due discoveries → due metric refreshes → rescore stale → duplicate scan of new videos → classify eligible (if a classifier is configured)',
     )
+    .option(
+      '--classify-limit <n>',
+      'maximum clusters to classify per pass',
+      positiveInt('--classify-limit'),
+      25,
+    )
+    .option('--no-classify', 'skip the classification step')
     .option(
       '--limit <n>',
       'maximum items per query / videos per platform',
@@ -160,59 +170,104 @@ export function registerScheduling(program: Command, io: CommandIO): void {
     )
     .option('--ladder <steps>', 'override the refresh ladder, e.g. 2h,8h,24h,72h')
     .option('--json', 'output JSON')
-    .action(async (opts: { limit: number; ladder?: string; json?: boolean }) => {
-      const json = opts.json ?? false;
-      try {
-        const ladder = opts.ladder ? parseLadder(opts.ladder) : undefined;
-        const runtime = loadRuntime(io);
-        const result = await withPipeline(runtime, async (deps) => {
-          const discovery = await runDueQueries(deps, { limit: opts.limit });
-          const refreshes: DueSummary[] = [];
-          for (const platform of refreshablePlatforms(deps)) {
-            refreshes.push(
-              await refreshDue(deps, {
-                platform,
+    .action(
+      async (opts: {
+        limit: number;
+        ladder?: string;
+        json?: boolean;
+        classify: boolean;
+        classifyLimit: number;
+      }) => {
+        const json = opts.json ?? false;
+        try {
+          const ladder = opts.ladder ? parseLadder(opts.ladder) : undefined;
+          const runtime = loadRuntime(io);
+          const result = await withPipeline(runtime, async (deps) => {
+            const discovery = await runDueQueries(deps, { limit: opts.limit });
+            const refreshes: DueSummary[] = [];
+            for (const platform of refreshablePlatforms(deps)) {
+              refreshes.push(
+                await refreshDue(deps, {
+                  platform,
+                  limit: opts.limit,
+                  ...(ladder ? { policy: { ladderMinutes: ladder } } : {}),
+                }),
+              );
+            }
+            const scoring = await rescore(deps, { scope: { kind: 'stale' }, limit: opts.limit });
+            // Last and isolated: duplicate analysis never fails the discovery pass.
+            let duplicates: ScanSummary | { error: string };
+            try {
+              duplicates = await scanDuplicates(deps.db, {
+                scope: { unprocessedOnly: true },
                 limit: opts.limit,
-                ...(ladder ? { policy: { ladderMinutes: ladder } } : {}),
-              }),
+                hasher: createThumbnailHasher(),
+              });
+            } catch (err) {
+              duplicates = { error: err instanceof Error ? err.message : String(err) };
+            }
+            // Classification runs after duplicate merging so a merged clip is classified once.
+            // Isolated like duplicates: a provider outage never fails the discovery pass.
+            let classification:
+              | { kind: 'skipped'; reason: string }
+              | { kind: 'error'; error: string }
+              | { kind: 'ran'; summary: Awaited<ReturnType<typeof classifyEligible>> };
+            const setup = createClassifier(runtime.config);
+            if (!opts.classify) {
+              classification = { kind: 'skipped', reason: 'disabled (--no-classify)' };
+            } else if (!setup.configured) {
+              classification = { kind: 'skipped', reason: setup.reason };
+            } else {
+              try {
+                const summary = await classifyEligible(deps, {
+                  classifier: setup.classifier,
+                  policy: {
+                    ...DEFAULT_CLASSIFICATION_POLICY,
+                    minScore: runtime.config.CLASSIFICATION_MIN_SCORE,
+                  },
+                  limit: opts.classifyLimit,
+                });
+                classification = { kind: 'ran', summary };
+              } catch (err) {
+                classification = {
+                  kind: 'error',
+                  error: err instanceof Error ? err.message : String(err),
+                };
+              }
+            }
+            return { discovery, refreshes, scoring, duplicates, classification };
+          });
+          const ok =
+            result.discovery.runs.every((r) => r.status === 'succeeded') &&
+            result.refreshes.every((r) => r.error === null) &&
+            result.scoring.failures.length === 0;
+          if (json) io.out(JSON.stringify({ ok, ...result }, null, 2));
+          else {
+            if (result.discovery.runs.length === 0) io.out('✔ no queries due');
+            for (const run of result.discovery.runs) printRun(io, run);
+            for (const s of result.discovery.skipped)
+              io.out(`- skipped query ${s.queryId}: ${s.reason}`);
+            for (const r of result.refreshes) printDue(io, r);
+            printRescore(io, result.scoring, false, 5);
+            const d = result.duplicates;
+            io.out(
+              'error' in d
+                ? `! duplicate analysis skipped: ${d.error}`
+                : `✔ duplicates: ${d.targets} new videos · ${d.suggested} possible · ${d.autoConfirmed} auto-confirmed${d.errors.length ? ` · ${d.errors.length} errors` : ''}`,
+            );
+            const c = result.classification;
+            io.out(
+              c.kind === 'skipped'
+                ? `- classification skipped: ${c.reason}`
+                : c.kind === 'error'
+                  ? `! classification failed: ${c.error}`
+                  : `✔ classified: ${c.summary.classified} new · ${c.summary.unchanged} unchanged · ${c.summary.failed} failed`,
             );
           }
-          const scoring = await rescore(deps, { scope: { kind: 'stale' }, limit: opts.limit });
-          // Last and isolated: duplicate analysis never fails the discovery pass.
-          let duplicates: ScanSummary | { error: string };
-          try {
-            duplicates = await scanDuplicates(deps.db, {
-              scope: { unprocessedOnly: true },
-              limit: opts.limit,
-              hasher: createThumbnailHasher(),
-            });
-          } catch (err) {
-            duplicates = { error: err instanceof Error ? err.message : String(err) };
-          }
-          return { discovery, refreshes, scoring, duplicates };
-        });
-        const ok =
-          result.discovery.runs.every((r) => r.status === 'succeeded') &&
-          result.refreshes.every((r) => r.error === null) &&
-          result.scoring.failures.length === 0;
-        if (json) io.out(JSON.stringify({ ok, ...result }, null, 2));
-        else {
-          if (result.discovery.runs.length === 0) io.out('✔ no queries due');
-          for (const run of result.discovery.runs) printRun(io, run);
-          for (const s of result.discovery.skipped)
-            io.out(`- skipped query ${s.queryId}: ${s.reason}`);
-          for (const r of result.refreshes) printDue(io, r);
-          printRescore(io, result.scoring, false, 5);
-          const d = result.duplicates;
-          io.out(
-            'error' in d
-              ? `! duplicate analysis skipped: ${d.error}`
-              : `✔ duplicates: ${d.targets} new videos · ${d.suggested} possible · ${d.autoConfirmed} auto-confirmed${d.errors.length ? ` · ${d.errors.length} errors` : ''}`,
-          );
+          if (!ok) process.exitCode = 1;
+        } catch (err) {
+          fail(io, json, err);
         }
-        if (!ok) process.exitCode = 1;
-      } catch (err) {
-        fail(io, json, err);
-      }
-    });
+      },
+    );
 }

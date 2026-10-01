@@ -19,6 +19,16 @@ export interface SourceCount {
   observations: number;
 }
 
+/** One confirmed platform representation of the cluster's underlying clip. */
+export interface Representation {
+  videoId: string;
+  platform: string;
+  url: string;
+  creator: string | null;
+  /** An official/authorized downloadable asset exists (never inferred from a source link). */
+  mediaDownload: boolean;
+}
+
 export interface FeedRow {
   clusterId: string;
   videoId: string;
@@ -40,7 +50,7 @@ export interface FeedRow {
   scoreComponents: Record<string, unknown> | null;
   reasonCodes: string[] | null;
   scoredAt: Date | null;
-  /** NULL while a merge review conflict is unresolved (see reviewConflict). */
+  /** NULL when undecided, unsaved ("cleared"), or while a merge review conflict is open. */
   reviewStatus: 'approved' | 'rejected' | 'saved' | 'already_used' | null;
   reviewedAt: Date | null;
   reviewNote: string | null;
@@ -65,6 +75,17 @@ export interface FeedRow {
   metricsAt: Date | null;
   versions: number;
   sources: SourceCount[];
+  /** Latest acquisition record: did the operator obtain the media externally? */
+  acquisitionStatus: 'obtained' | 'not_obtained' | null;
+  obtainedAt: Date | null;
+  acquisitionNote: string | null;
+  /** Confirmed representations (representative first). */
+  representations: Representation[];
+  mediaDownloadAvailable: boolean;
+  /** An undecided possible duplicate of content already marked used. */
+  possibleDuplicateOfUsed: boolean;
+  /** Platform-normalized growth (score component), when measurable. */
+  velocity: number | null;
   stateRank: number;
   sortTime: Date;
 }
@@ -95,13 +116,87 @@ export interface FeedFilters {
   rights?: string | undefined;
   flagged?: boolean | undefined;
   possibleDuplicates?: boolean | undefined;
+  /** Inbox view (see INBOX_VIEWS). Undefined = no view constraint. */
+  view?: InboxView | undefined;
+  /** Creator display name or handle (case-insensitive exact match). */
+  creator?: string | undefined;
 }
+
+/**
+ * Inbox views:
+ * - viral:      Viral Now — fresh (≤ VIRAL_NOW_HOURS), scored/provisional breakouts not yet
+ *               triaged (no decision, or an open merge conflict), never used or rejected.
+ * - unreviewed: no decision yet (any score state).
+ * - saved:      the shortlist.
+ * - obtained:   media obtained externally and not yet used.
+ * - used:       already used (history; never surfaced as fresh elsewhere).
+ * - rejected:   rejected.
+ * - all:        everything.
+ */
+export const INBOX_VIEWS = [
+  'viral',
+  'unreviewed',
+  'saved',
+  'obtained',
+  'used',
+  'rejected',
+  'all',
+] as const;
+export type InboxView = (typeof INBOX_VIEWS)[number];
+export const VIRAL_NOW_HOURS = 72;
+
+/**
+ * Sorts. Unavailable values never compare as zero: rows without the value sort
+ * after rows with it (e.g. "Most viewed" puts platforms without view counts last).
+ * "virality" uses the deterministic, platform-normalized score.
+ */
+export const FEED_SORTS = ['virality', 'newest', 'growth', 'views', 'discovered'] as const;
+export type FeedSort = (typeof FEED_SORTS)[number];
 
 interface Cursor {
   r: number;
   s: number;
   t: string;
   id: string;
+}
+
+/** Keyset position for the non-virality sorts: (missing?, value desc, id). */
+interface SortCursor {
+  sort: Exclude<FeedSort, 'virality'>;
+  n: number;
+  v: number;
+  id: string;
+}
+
+const SORT_KEYS: Record<Exclude<FeedSort, 'virality'>, { value: SQL; missing: SQL }> = {
+  newest: { value: sql`extract(epoch from b."sortTime")::float8`, missing: sql`0` },
+  discovered: { value: sql`extract(epoch from b."firstDiscoveredAt")::float8`, missing: sql`0` },
+  views: { value: sql`coalesce(b.views, 0)::float8`, missing: sql`(b.views is null)::int` },
+  growth: { value: sql`coalesce(b.velocity, 0)::float8`, missing: sql`(b.velocity is null)::int` },
+};
+
+function encodeSortCursor(c: SortCursor): string {
+  return Buffer.from(JSON.stringify(c)).toString('base64url');
+}
+
+function decodeSortCursor(value: string | null | undefined, sort: FeedSort): SortCursor | null {
+  if (!value || sort === 'virality') return null;
+  try {
+    const c = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<SortCursor>;
+    if (
+      c.sort === sort &&
+      (c.n === 0 || c.n === 1) &&
+      typeof c.v === 'number' &&
+      Number.isFinite(c.v) &&
+      typeof c.id === 'string' &&
+      /^[0-9a-f-]{36}$/i.test(c.id)
+    ) {
+      return { sort, n: c.n, v: c.v, id: c.id };
+    }
+  } catch {
+    // fall through
+  }
+  return null;
 }
 
 export function encodeCursor(
@@ -169,7 +264,7 @@ export function baseQuery(): SQL {
       coalesce(cr.handle, v.creator_handle) as "creatorHandle",
       s.value as score, s.state::text as "scoreState", s.confidence,
       s.components as "scoreComponents", s.reason_codes as "reasonCodes", s.computed_at as "scoredAt",
-      case when ${REVIEW_CONFLICT} then null else rv.status::text end as "reviewStatus",
+      case when ${REVIEW_CONFLICT} or rv.status = 'cleared' then null else rv.status::text end as "reviewStatus",
       rv.created_at as "reviewedAt", rv.note as "reviewNote",
       case when ${RIGHTS_CONFLICT} then 'conflict' else coalesce(rt.status::text, 'unknown') end as "rightsStatus",
       ${REVIEW_CONFLICT} as "reviewConflict", ${RIGHTS_CONFLICT} as "rightsConflict",
@@ -184,6 +279,28 @@ export function baseQuery(): SQL {
       ms.views, ms.likes, ms.comments, ms.shares, ms.captured_at as "metricsAt",
       (select count(*)::int from videos v2 where v2.cluster_id = c.id) as versions,
       coalesce(sg.sources, '[]'::jsonb) as sources,
+      aq.status::text as "acquisitionStatus",
+      case when aq.status = 'obtained' then aq.created_at end as "obtainedAt",
+      aq.note as "acquisitionNote",
+      coalesce((
+        select jsonb_agg(jsonb_build_object(
+            'videoId', v5.id, 'platform', v5.platform, 'url', v5.canonical_url,
+            'creator', coalesce(v5.creator_display_name, v5.creator_handle),
+            'mediaDownload', exists(select 1 from media_assets ma where ma.video_id = v5.id
+              and (ma.expires_at is null or ma.expires_at > now())))
+          order by (v5.id = v.id) desc, v5.first_discovered_at, v5.id)
+        from videos v5 where v5.cluster_id = c.id), '[]'::jsonb) as representations,
+      exists(select 1 from media_assets ma join videos v6 on v6.id = ma.video_id
+        where v6.cluster_id = c.id and (ma.expires_at is null or ma.expires_at > now())) as "mediaDownloadAvailable",
+      exists(select 1 from duplicate_candidates d
+        join videos va on va.id = d.video_a_id join videos vb on vb.id = d.video_b_id
+        where d.status = 'possible' and va.cluster_id <> vb.cluster_id
+          and (va.cluster_id = c.id or vb.cluster_id = c.id)
+          and (select e.status from review_events e
+               where e.cluster_id = case when va.cluster_id = c.id then vb.cluster_id else va.cluster_id end
+               order by e.created_at desc, e.id desc limit 1) = 'already_used') as "possibleDuplicateOfUsed",
+      case when s.components->'velocity'->>'available' = 'true'
+        then (s.components->'velocity'->>'value')::float8 end as velocity,
       case s.state when 'scored' then 0 when 'provisional' then 1 when 'insufficient_evidence' then 2 else 3 end as "stateRank",
       coalesce(v.published_at, v.first_discovered_at) as "sortTime"
     from clusters c
@@ -206,6 +323,10 @@ export function baseQuery(): SQL {
     left join lateral (
       select status, created_at from rights where cluster_id = c.id order by created_at desc, id desc limit 1
     ) rt on true
+    left join lateral (
+      select status, note, created_at from acquisition_events
+      where cluster_id = c.id order by created_at desc, id desc limit 1
+    ) aq on true
     left join lateral (
       select max(merged_at) filter (where review_conflict) as review_at,
         max(merged_at) filter (where rights_conflict) as rights_at
@@ -264,6 +385,35 @@ function filterSql(filters: FeedFilters, now: Date): SQL[] {
   if (filters.flagged)
     where.push(sql`jsonb_array_length(coalesce(f."safetyFlags", '[]'::jsonb)) > 0`);
   if (filters.possibleDuplicates) where.push(sql`f."possibleDuplicates" > 0`);
+  if (filters.creator) {
+    const c = filters.creator.trim().replace(/^@/, '').toLowerCase();
+    where.push(sql`(lower(f."creatorName") = ${c} or lower(f."creatorHandle") = ${c})`);
+  }
+  const notUsed = sql`f."reviewStatus" is distinct from 'already_used'`;
+  switch (filters.view) {
+    case 'viral':
+      where.push(sql`(f."reviewStatus" is null) and ${notUsed}`);
+      where.push(sql`f."scoreState" in ('scored', 'provisional')`);
+      where.push(sql`f."sortTime" >= ${new Date(now.getTime() - VIRAL_NOW_HOURS * 3_600_000)}`);
+      break;
+    case 'unreviewed':
+      where.push(sql`f."reviewStatus" is null and not f."reviewConflict"`);
+      break;
+    case 'saved':
+      where.push(sql`f."reviewStatus" = 'saved'`);
+      break;
+    case 'obtained':
+      where.push(sql`f."acquisitionStatus" = 'obtained' and ${notUsed}`);
+      break;
+    case 'used':
+      where.push(sql`f."reviewStatus" = 'already_used'`);
+      break;
+    case 'rejected':
+      where.push(sql`f."reviewStatus" = 'rejected'`);
+      break;
+    default:
+      break;
+  }
   return where;
 }
 
@@ -274,10 +424,46 @@ export interface FeedPage {
 
 export async function getFeed(
   db: AnyDatabase,
-  options: { filters?: FeedFilters; cursor?: string | null; pageSize?: number; now?: Date } = {},
+  options: {
+    filters?: FeedFilters;
+    sort?: FeedSort;
+    cursor?: string | null;
+    pageSize?: number;
+    now?: Date;
+  } = {},
 ): Promise<FeedPage> {
   const pageSize = Math.min(Math.max(options.pageSize ?? 25, 1), 100);
+  const sort = options.sort ?? 'virality';
   const where = filterSql(options.filters ?? {}, options.now ?? new Date());
+
+  if (sort !== 'virality') {
+    const key = SORT_KEYS[sort];
+    const c = decodeSortCursor(options.cursor, sort);
+    if (c) {
+      where.push(sql`(f."sortMissing" > ${c.n}
+        or (f."sortMissing" = ${c.n} and (f."sortValue" < ${c.v}::float8
+          or (f."sortValue" = ${c.v}::float8 and f."clusterId" > ${c.id}::uuid))))`);
+    }
+    const whereSql = where.length ? sql`where ${sql.join(where, sql` and `)}` : sql``;
+    const result = await rows<FeedRow & { sortMissing: number; sortValue: number }>(
+      db,
+      sql`select * from (
+          select b.*, ${key.missing} as "sortMissing", ${key.value} as "sortValue" from (${baseQuery()}) b
+        ) f ${whereSql}
+        order by f."sortMissing" asc, f."sortValue" desc, f."clusterId" asc
+        limit ${pageSize + 1}`,
+    );
+    const items = result.slice(0, pageSize);
+    const last = items[items.length - 1];
+    return {
+      items,
+      nextCursor:
+        result.length > pageSize && last
+          ? encodeSortCursor({ sort, n: last.sortMissing, v: last.sortValue, id: last.clusterId })
+          : null,
+    };
+  }
+
   const cursor = decodeCursor(options.cursor);
   if (cursor) {
     where.push(sql`(
@@ -316,16 +502,22 @@ export interface FeedSummary {
   unclassified: number;
   conflicts: number;
   possibleDuplicates: number;
+  viralNow: number;
+  /** Obtained and not yet used. */
+  obtained: number;
 }
 
 /** "Breaking out" = scored with a latest virality score at or above this. */
 export const BREAKING_OUT_SCORE = 70;
 
-export async function getSummary(db: AnyDatabase): Promise<FeedSummary> {
+export async function getSummary(db: AnyDatabase, now: Date = new Date()): Promise<FeedSummary> {
+  const viral = sql.join(filterSql({ view: 'viral' }, now), sql` and `);
   const [row] = await rows<FeedSummary>(
     db,
     sql`select
       count(*)::int as total,
+      count(*) filter (where ${viral})::int as "viralNow",
+      count(*) filter (where f."acquisitionStatus" = 'obtained' and f."reviewStatus" is distinct from 'already_used')::int as obtained,
       count(*) filter (where f."scoreState" = 'scored' and f.score >= ${BREAKING_OUT_SCORE})::int as "breakingOut",
       count(*) filter (where f."reviewStatus" is null and not f."reviewConflict")::int as unreviewed,
       count(*) filter (where f."reviewStatus" = 'saved')::int as saved,
@@ -353,6 +545,8 @@ export async function getSummary(db: AnyDatabase): Promise<FeedSummary> {
       unclassified: 0,
       conflicts: 0,
       possibleDuplicates: 0,
+      viralNow: 0,
+      obtained: 0,
     }
   );
 }

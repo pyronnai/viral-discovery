@@ -38,7 +38,19 @@ export const RIGHTS_STATUSES = [
 export const RightsStatusSchema = z.enum(RIGHTS_STATUSES);
 export type RightsStatus = z.infer<typeof RightsStatusSchema>;
 
-export const REVIEW_STATUSES = ['approved', 'rejected', 'saved', 'already_used'] as const;
+/**
+ * Cluster-level triage decisions (append-only; the latest is current).
+ * - saved:        on the shortlist — "I want this clip / I want to come back to it".
+ * - already_used: content already used — never surfaced as a fresh candidate again.
+ * - cleared:      removed from the shortlist ("unsave"); no current decision.
+ */
+export const REVIEW_STATUSES = [
+  'approved',
+  'rejected',
+  'saved',
+  'already_used',
+  'cleared',
+] as const;
 export const ReviewStatusSchema = z.enum(REVIEW_STATUSES);
 export type ReviewStatus = z.infer<typeof ReviewStatusSchema>;
 
@@ -91,3 +103,11 @@ export type ScoreState = z.infer<typeof ScoreStateSchema>;
 export const DUPLICATE_STATUSES = ['possible', 'auto_confirmed', 'confirmed', 'rejected'] as const;
 export const DuplicateStatusSchema = z.enum(DUPLICATE_STATUSES);
 export type DuplicateStatus = z.infer<typeof DuplicateStatusSchema>;
+
+/**
+ * Whether the operator has obtained the source media EXTERNALLY (tracking only —
+ * the system never downloads media). Obtained is not "used" and not "published".
+ */
+export const ACQUISITION_STATUSES = ['obtained', 'not_obtained'] as const;
+export const AcquisitionStatusSchema = z.enum(ACQUISITION_STATUSES);
+export type AcquisitionStatus = z.infer<typeof AcquisitionStatusSchema>;

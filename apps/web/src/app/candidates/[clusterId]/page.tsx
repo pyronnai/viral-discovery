@@ -7,6 +7,7 @@ import {
   conflictViews,
   formatCount,
   getCandidate,
+  getCreatorHistory,
   growthSeries,
   mergedInto,
   platformName,
@@ -27,6 +28,12 @@ import {
   SourcesBlock,
   Sparkline,
 } from '../../../components/Evidence.tsx';
+import { InboxActions } from '../../../components/InboxActions.tsx';
+import {
+  RepresentationList,
+  Representations,
+  StateBadges,
+} from '../../../components/Representations.tsx';
 import { ReviewControls } from '../../../components/ReviewControls.tsx';
 import { RightsForm } from '../../../components/RightsForm.tsx';
 import { Thumbnail } from '../../../components/Thumbnail.tsx';
@@ -66,6 +73,10 @@ export default async function CandidatePage({
   }
   const now = new Date();
   const card = toCardView(detail.summary, ctx.roles, now);
+  const creatorHistory = (await getCreatorHistory(ctx.db, clusterId)).map((r) =>
+    toCardView(r, ctx.roles, now),
+  );
+  const latestSnapshot = detail.snapshots[detail.snapshots.length - 1] ?? null;
   const latestScore = detail.scores[0] ?? null;
   const classification = detail.classifications.find((c) => c.current) ?? null;
   const series = growthSeries(detail.snapshots);
@@ -81,7 +92,7 @@ export default async function CandidatePage({
   return (
     <article className="detail">
       <p>
-        <Link href="/">← Back to feed</Link>
+        <Link href="/">← Back to inbox</Link>
       </p>
       <div className="detail-head">
         <Thumbnail src={card.thumbnailUrl} alt={card.title} platform={card.platform} large />
@@ -94,18 +105,20 @@ export default async function CandidatePage({
             {fmt(detail.summary.firstDiscoveredAt)}
           </p>
           {card.availabilityNote ? <p className="warn">{card.availabilityNote}</p> : null}
-          <p>
-            <a className="btn" href={card.canonicalUrl} target="_blank" rel="noopener noreferrer">
-              Open original ↗
-            </a>{' '}
-            <span className="muted small">{card.canonicalUrl}</span>
-          </p>
-          <ReviewControls
-            clusterId={clusterId}
-            status={card.review.status}
-            conflict={card.conflicts.review}
-            withNote
+          <StateBadges inbox={card.inbox} conflict={card.conflicts.review} />
+          <Representations
+            representations={card.representations}
+            canonicalUrl={card.canonicalUrl}
+            platform={card.platform}
+            access={card.access}
           />
+          <InboxActions clusterId={clusterId} state={card.inbox} withNote />
+          {card.inbox.obtained ? (
+            <p className="small">
+              ⬇ Obtained {fmt(card.inbox.obtainedAt)}
+              {card.inbox.obtainedNote ? ` — “${card.inbox.obtainedNote}”` : ''}
+            </p>
+          ) : null}
         </div>
         <ScoreBadge
           text={card.score.text}
@@ -116,6 +129,79 @@ export default async function CandidatePage({
       </div>
 
       <ConflictBanner conflicts={conflicts} />
+
+      <section>
+        <h2>Source &amp; access</h2>
+        <dl className="facts">
+          <div>
+            <dt>Creator</dt>
+            <dd>
+              {card.creator ?? 'unknown'}
+              {card.creatorHandle ? ` (@${card.creatorHandle})` : ''}
+            </dd>
+          </div>
+          <div>
+            <dt>Canonical platform</dt>
+            <dd>{card.platform}</dd>
+          </div>
+          <div>
+            <dt>Original URL</dt>
+            <dd>
+              <a href={card.canonicalUrl} target="_blank" rel="noopener noreferrer">
+                {card.canonicalUrl}
+              </a>
+            </dd>
+          </div>
+          <div>
+            <dt>Published</dt>
+            <dd>{fmt(detail.summary.publishedAt)}</dd>
+          </div>
+          <div>
+            <dt>Duration</dt>
+            <dd>{card.duration}</dd>
+          </div>
+          <div>
+            <dt>Latest metrics</dt>
+            <dd>
+              {latestSnapshot
+                ? `${formatCount(latestSnapshot.views)} views · ${formatCount(latestSnapshot.likes)} likes · ${formatCount(latestSnapshot.comments)} comments (${fmt(latestSnapshot.capturedAt)})`
+                : 'none from this platform'}
+            </dd>
+          </div>
+          <div>
+            <dt>Labels</dt>
+            <dd>
+              {card.classification.kind === 'classified'
+                ? card.classification.labels.map((l) => l.label).join(', ')
+                : 'unclassified'}
+            </dd>
+          </div>
+          <div>
+            <dt>Virality</dt>
+            <dd>
+              {card.score.text} · {card.score.stateLabel.toLowerCase()} · confidence{' '}
+              {card.score.confidence}
+            </dd>
+          </div>
+          <div>
+            <dt>Duplicates</dt>
+            <dd>{card.duplicateStatus}</dd>
+          </div>
+          <div>
+            <dt>Rights</dt>
+            <dd>
+              {card.rights.label}
+              {card.rights.status === 'unknown' ? ' — not permission' : ''}
+            </dd>
+          </div>
+          <div>
+            <dt>Media</dt>
+            <dd>{card.access.label}</dd>
+          </div>
+        </dl>
+        <h3>Available representations</h3>
+        <RepresentationList representations={card.representations} />
+      </section>
 
       <section>
         <h2>Virality evidence</h2>
@@ -345,7 +431,40 @@ export default async function CandidatePage({
       </section>
 
       <section>
+        <h2>More from this creator</h2>
+        {creatorHistory.length === 0 ? (
+          <p className="muted small">No other candidates from this creator yet.</p>
+        ) : (
+          <ul className="history">
+            {creatorHistory.map((h) => (
+              <li key={h.clusterId}>
+                <Link href={h.href}>{h.title}</Link>{' '}
+                <span className="muted small">
+                  · {h.platform} · {h.age} old · score {h.score.text} (
+                  {h.score.stateLabel.toLowerCase()}) · {h.review.label}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {card.creator || card.creatorHandle ? (
+          <Link
+            className="small"
+            href={`/?view=all&creator=${encodeURIComponent(card.creatorHandle ?? card.creator ?? '')}`}
+          >
+            All candidates from this creator →
+          </Link>
+        ) : null}
+      </section>
+
+      <section>
         <h2>Review history</h2>
+        <ReviewControls
+          clusterId={clusterId}
+          status={card.review.status}
+          conflict={card.conflicts.review}
+          withNote
+        />
         {detail.reviews.length === 0 ? (
           <p className="muted">No decisions yet.</p>
         ) : (

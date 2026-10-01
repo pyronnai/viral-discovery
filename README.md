@@ -1,14 +1,17 @@
 # viral-discovery
 
-Viral/funny short-form video **intelligence** agent: discover → normalize → dedupe →
-track engagement → score → categorize → human review. Links to and analyzes public
-metadata only; never downloads third-party media.
+**A multi-source viral-video discovery and review inbox.**
 
-**Status: Phase 4 — content understanding + human review dashboard.** Multi-source
-discovery (YouTube, Twitch, Bluesky, manual URLs incl. TikTok), a deterministic breakout
-score, model-based content classification (labels, review flags, "why this may work"
-hypotheses), and a server-rendered review dashboard with cluster-level decisions.
-See [`docs/architecture.md`](docs/architecture.md) and [`docs/sources/`](docs/sources/).
+The system finds and prioritizes candidate funny/viral videos: discover → rank (deterministic
+breakout score) → classify → deduplicate across platforms → review → save → open the
+original → track what you obtained and already used. **You** do the editing, compilation,
+captions and publishing externally — the system never downloads media, plans compilations,
+or publishes anything.
+
+**Status: Phase 5 — daily viral-video inbox.** Sources: YouTube, Twitch, Bluesky, and manual
+URLs (incl. TikTok via oEmbed); Reddit is access-gated. No source is the "center": every
+adapter feeds the same inbox. See [`docs/architecture.md`](docs/architecture.md) and
+[`docs/sources/`](docs/sources/).
 
 ## Requirements
 
@@ -51,12 +54,36 @@ pnpm cli queries add youtube --kind search --param q="funny animals" \
 pnpm cli queries add youtube --kind channel_feed --param channelId=UC... --cadence 180
 pnpm cli queries add bluesky --kind search --param q=funny --param domain=tiktok.com --cadence 60
 pnpm cli queries list
-pnpm cli tick                          # due queries → due refreshes → rescore stale → duplicate scan of new videos (cron this)
+pnpm cli tick                          # one full pass (see Scheduling below)
 pnpm cli refresh-metrics youtube --due --ladder 2h,8h,24h,72h
 pnpm cli rescore --explain             # stale only by default; --unscored / --recent 24 / --video <id>
 ```
 
-## Review dashboard
+## Scheduling (recurring discovery)
+
+There is no external scheduler and no job producer: **`pnpm cli tick` is the production
+loop.** Each run is idempotent and does, in order:
+
+1. due discoveries (stored queries whose cadence has elapsed),
+2. due metric refreshes (per-platform refresh ladder),
+3. rescoring of stale scores,
+4. near-duplicate scan of new/changed videos (failures never fail the pass),
+5. classification of eligible candidates — only if `ANTHROPIC_API_KEY` is set
+   (`--no-classify` to skip, `--classify-limit` to bound cost; failures never fail the pass).
+
+Run it from cron, e.g. every 15 minutes (a run is quick when nothing is due):
+
+```cron
+*/15 * * * * cd /path/to/viral-discovery && pnpm cli tick >> var/tick.log 2>&1
+```
+
+Avoid overlapping runs (e.g. wrap with `flock -n /tmp/vd-tick.lock`); repeated or overlapping
+passes are still safe — runs, sightings, snapshots, scores and classifications are idempotent.
+The dashboard's **Discovery health** page (`/health`) shows whether sources are actually
+finding fresh videos. `pnpm worker` remains available for queued jobs, but nothing enqueues
+them automatically yet.
+
+## Daily inbox (dashboard)
 
 ```bash
 pnpm --filter @vd/web dev        # http://localhost:3000 (reads the root .env)
@@ -66,6 +93,21 @@ pnpm cli duplicates scan         # near-duplicates of unprocessed videos (bounde
 pnpm cli duplicates list         # possible duplicates with evidence (--status confirmed|auto_confirmed|rejected)
 pnpm cli duplicates explain <videoA> <videoB>   # evidence for one pair, stores nothing
 ```
+
+- **🔥 Viral Now** (default): fresh (≤ 72 h), scored/provisional breakouts you haven't triaged,
+  ranked by the deterministic virality score. **👀 Unreviewed**, **★ Saved** (shortlist),
+  **⬇ Obtained** (you got the media externally, not yet used), **✓ Already used**, Rejected, All.
+- Quick category chips (funny, animals, fails, reactions, memes, unexpected), filters (platform,
+  minimum score, freshness, creator, rights) and sorts (virality, newest, fastest growing,
+  most viewed, recently discovered) — all in the URL.
+- Per card: **▶ Open original** (plus "Also on" links for confirmed reposts on other
+  platforms), ☆ Save, ⬇ Obtained, Used; Approve/Reject and Details as secondary actions.
+- Select several cards for bulk Save / Obtained / Used / Reject (broad actions ask first), and
+  export the selection or the current view as CSV/JSON — metadata and links only.
+- **Saved ≠ Obtained ≠ Used.** Saved = "I want this clip"; Obtained = you obtained the source
+  yourself (tracking only); Already used = never surface this content as fresh again —
+  including reposts of it confirmed on other platforms.
+- Rights are shown, never assumed: "Rights: Unknown" is not permission, and doesn't block saving.
 
 Possible duplicates are confirmed or rejected on the candidate detail page; see "Identity:
 exact vs near-duplicate" in the architecture doc.

@@ -307,3 +307,34 @@ export async function getCandidate(
     merges,
   };
 }
+
+/**
+ * Other candidates from the same creator (same creator record, or the same
+ * platform + handle/display name), newest first. Bounded: this is a quick
+ * "is this account worth watching?" glance, not creator analytics.
+ */
+export async function getCreatorHistory(
+  db: AnyDatabase,
+  clusterId: string,
+  limit = 6,
+): Promise<FeedRow[]> {
+  if (!/^[0-9a-f-]{36}$/i.test(clusterId)) return [];
+  return rows<FeedRow>(
+    db,
+    sql`with mine as (
+        select creator_id, platform, lower(coalesce(creator_handle, '')) as handle,
+          lower(coalesce(creator_display_name, '')) as name
+        from videos where cluster_id = ${clusterId}::uuid
+      ), related as (
+        select distinct v.cluster_id from videos v join mine m on
+          (m.creator_id is not null and v.creator_id = m.creator_id)
+          or (v.platform = m.platform and m.handle <> '' and lower(v.creator_handle) = m.handle)
+          or (v.platform = m.platform and m.name <> '' and lower(v.creator_display_name) = m.name)
+        where v.cluster_id <> ${clusterId}::uuid
+      )
+      select * from (${baseQuery()}) f
+      where f."clusterId" in (select cluster_id from related)
+      order by f."sortTime" desc, f."clusterId"
+      limit ${Math.min(Math.max(limit, 1), 20)}`,
+  );
+}

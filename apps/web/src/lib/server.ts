@@ -3,7 +3,7 @@
  * process, adapter sighting roles (from manifests), and the classifier if
  * configured. Rendering stored data never requires source API credentials.
  */
-import { buildAdapterRegistry } from '@vd/adapter-wiring';
+import { PLANNED_ADAPTERS, buildAdapterRegistry, type AdapterStatus } from '@vd/adapter-wiring';
 import { createClassifier, type ClassifierSetup } from '@vd/classification';
 import { createLogger, loadConfig, type AppConfig, type Logger } from '@vd/config';
 import { createDb, type DbHandle } from '@vd/db';
@@ -15,6 +15,9 @@ export interface ServerContext {
   db: DbHandle['db'];
   roles: SightingRoles;
   platforms: Record<string, string>;
+  /** Every known adapter with configured/unconfigured status (names of missing env only). */
+  adapters: AdapterStatus[];
+  plannedAdapters: { id: string; reason: string }[];
   classifier: ClassifierSetup;
   logger: Logger;
   pipeline: () => PipelineDeps;
@@ -37,6 +40,8 @@ export function getContext(): ServerContext {
     db: handle.db,
     roles: wired.sightingRoles,
     platforms: wired.platforms,
+    adapters: wired.statuses,
+    plannedAdapters: PLANNED_ADAPTERS.map((p) => ({ id: p.id, reason: p.reason })),
     classifier: createClassifier(config),
     logger,
     pipeline: () => ({

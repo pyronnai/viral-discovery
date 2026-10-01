@@ -4,7 +4,15 @@
  */
 import { CONTENT_LABELS } from '@vd/classification';
 import { RIGHTS_STATUSES } from '@vd/core';
-import { REVIEW_FILTERS, STATE_FILTERS, type FeedFilters } from '@vd/review';
+import {
+  FEED_SORTS,
+  INBOX_VIEWS,
+  REVIEW_FILTERS,
+  STATE_FILTERS,
+  type FeedFilters,
+  type FeedSort,
+  type InboxView,
+} from '@vd/review';
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -37,12 +45,29 @@ export function parseFilters(params: SearchParams): FeedFilters {
     rights: oneOf(one(params, 'rights'), [...RIGHTS_STATUSES, 'conflict'] as const),
     flagged: one(params, 'flagged') === '1' ? true : undefined,
     possibleDuplicates: one(params, 'dups') === '1' ? true : undefined,
+    view: oneOf(one(params, 'view'), INBOX_VIEWS),
+    creator: creatorParam(one(params, 'creator')),
   };
 }
 
+/** Free-text creator name/handle; only length-limited (it is a bound SQL parameter). */
+function creatorParam(value: string | undefined): string | undefined {
+  return value && value.length <= 80 ? value : undefined;
+}
+
+/** The view the inbox shows: an explicit ?view=, else Viral Now. */
+export function effectiveView(filters: FeedFilters): InboxView {
+  return filters.view ?? 'viral';
+}
+
+export function parseSort(params: SearchParams): FeedSort {
+  return oneOf(one(params, 'sort'), FEED_SORTS) ?? 'virality';
+}
+
 /** Builds a feed URL from filters (+ optional cursor), omitting empty values. */
-export function feedHref(filters: FeedFilters, cursor?: string | null): string {
+export function feedHref(filters: FeedFilters, cursor?: string | null, sort?: FeedSort): string {
   const q = new URLSearchParams();
+  if (filters.view) q.set('view', filters.view);
   if (filters.review) q.set('review', filters.review);
   if (filters.label) q.set('label', filters.label);
   if (filters.platform) q.set('platform', filters.platform);
@@ -54,11 +79,14 @@ export function feedHref(filters: FeedFilters, cursor?: string | null): string {
   if (filters.rights) q.set('rights', filters.rights);
   if (filters.flagged) q.set('flagged', '1');
   if (filters.possibleDuplicates) q.set('dups', '1');
+  if (filters.creator) q.set('creator', filters.creator);
+  if (sort && sort !== 'virality') q.set('sort', sort);
   if (cursor) q.set('cursor', cursor);
   const s = q.toString();
   return s ? `/?${s}` : '/';
 }
 
+/** Filters beyond the inbox view itself. */
 export function hasFilters(filters: FeedFilters): boolean {
-  return Object.values(filters).some((v) => v !== undefined);
+  return Object.entries(filters).some(([k, v]) => k !== 'view' && v !== undefined);
 }

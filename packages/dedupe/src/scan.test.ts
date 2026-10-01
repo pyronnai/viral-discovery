@@ -377,6 +377,36 @@ describe('human decisions and cluster merges', () => {
     expect(merge!.details['rightsReason']).toMatch(/one representation only/);
   });
 
+  it('a repost confirmed as the same clip inherits "already used" and "obtained"', async () => {
+    const { s, pair } = await possibleTikTokPair();
+    const ytCluster = await clusterOf(s.yt.videoId);
+    // The YouTube clip was used; the TikTok repost was reviewed AFTER (newer) and saved.
+    await db.insert(schema.reviewEvents).values([
+      { clusterId: ytCluster, status: 'already_used', createdAt: hoursAgo(0.6) },
+      { clusterId: s.tiktok.clusterId, status: 'saved', createdAt: hoursAgo(0.3) },
+    ]);
+    await db
+      .insert(schema.acquisitionEvents)
+      .values({ clusterId: ytCluster, status: 'obtained', createdAt: hoursAgo(0.6) });
+    const r = await confirmDuplicate(db, pair.id, { now: NOW });
+    expect(r.merge?.reviewConflict).toBe(false);
+    const state = await clusterDecisionState(db, ytCluster);
+    expect(state).toMatchObject({
+      review: 'already_used',
+      acquisition: 'obtained',
+      reviewConflict: false,
+    });
+    const events = await db
+      .select()
+      .from(schema.reviewEvents)
+      .where(eq(schema.reviewEvents.clusterId, ytCluster));
+    expect(events.map((e) => [e.status, e.reviewer]).sort()).toEqual([
+      ['already_used', 'owner'],
+      ['already_used', 'system'],
+      ['saved', 'owner'],
+    ]);
+  });
+
   it('refuses to confirm when another version pair was already rejected', async () => {
     const { s, pair } = await possibleTikTokPair();
     const [video] = await db
@@ -409,6 +439,7 @@ describe('merge conflict rules', () => {
     rightsHolder: null,
     rightsAt: null,
     rightsConflict: false,
+    acquisition: null,
     hasHumanDecisions: false,
     ...over,
   });
@@ -418,6 +449,10 @@ describe('merge conflict rules', () => {
     [{ review: 'approved' }, { review: 'rejected' }, true],
     [{ review: 'saved' }, { review: 'approved' }, true],
     [{ reviewConflict: true }, {}, true],
+    // "Already used" always wins — never a conflict.
+    [{ review: 'already_used' }, { review: 'approved' }, false],
+    [{ review: 'saved' }, { review: 'already_used' }, false],
+    [{ review: 'already_used' }, { reviewConflict: true }, false],
   ])('review %j + %j → conflict %s', (a, b, conflict) => {
     expect(mergeConflicts(state(a), state(b)).review).toBe(conflict);
   });
@@ -443,6 +478,7 @@ describe('representative selection', () => {
   const base = {
     availability: 'available',
     hasMetrics: true,
+    hasScore: true,
     thumbnailUrl: 'https://i.ytimg.com/x.jpg',
     title: 't',
     durationMs: 1,
@@ -450,7 +486,14 @@ describe('representative selection', () => {
     hasCreator: true,
     firstDiscoveredAt: new Date('2026-09-02T00:00:00Z'),
   };
-  it('prefers available → canonical metrics → thumbnail → metadata → earliest publish; never popularity', () => {
+  it('prefers available → scored → canonical metrics → thumbnail → metadata → earliest publish; never popularity', () => {
+    // A scored version beats an earlier-published unscored one (a merge must not hide the score).
+    expect(
+      chooseRepresentative([
+        { ...base, id: 'b', hasScore: false, publishedAt: new Date('2026-08-01T00:00:00Z') },
+        { ...base, id: 'c' },
+      ]).id,
+    ).toBe('c');
     expect(
       chooseRepresentative([
         { ...base, id: 'b', availability: 'removed' },

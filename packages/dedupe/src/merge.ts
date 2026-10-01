@@ -29,6 +29,8 @@ export interface RepresentativeCandidate {
   id: string;
   availability: string;
   hasMetrics: boolean;
+  /** Has a measured virality score (scored/provisional — its size is never compared). */
+  hasScore: boolean;
   thumbnailUrl: string | null;
   title: string | null;
   durationMs: number | null;
@@ -40,15 +42,18 @@ export interface RepresentativeCandidate {
 /**
  * Deterministic representative policy (first difference wins):
  *  1. available > unknown > private/removed (a card must be openable);
- *  2. has canonical metric snapshots (authoritative platform measurements);
- *  3. usable https thumbnail;
- *  4. richer canonical metadata (title, duration, publish time, creator);
- *  5. earliest publish time (the likelier original upload — NOT the more popular one);
- *  6. earliest first discovery, then id.
- * View counts and virality scores are never consulted.
+ *  2. has a virality score — so a merge never hides the cluster's measured evidence
+ *     (whether a score EXISTS, never how high it is);
+ *  3. has canonical metric snapshots (authoritative platform measurements);
+ *  4. usable https thumbnail;
+ *  5. richer canonical metadata (title, duration, publish time, creator);
+ *  6. earliest publish time (the likelier original upload — NOT the more popular one);
+ *  7. earliest first discovery, then id.
+ * View counts and score values are never compared.
  */
 export const REPRESENTATIVE_POLICY = [
   'available',
+  'has_score',
   'canonical_metrics',
   'usable_thumbnail',
   'metadata_richness',
@@ -67,6 +72,7 @@ const AVAILABILITY_RANK: Record<string, number> = {
 export function chooseRepresentative<T extends RepresentativeCandidate>(videos: readonly T[]): T {
   const key = (v: RepresentativeCandidate) => [
     AVAILABILITY_RANK[v.availability] ?? 4,
+    v.hasScore ? 0 : 1,
     v.hasMetrics ? 0 : 1,
     v.thumbnailUrl && /^https:\/\//.test(v.thumbnailUrl) ? 0 : 1,
     -[v.title, v.durationMs, v.publishedAt, v.hasCreator || null].filter((x) => x !== null).length,
@@ -93,7 +99,8 @@ async function representativeCandidates(db: Executor, clusterId: string) {
     sql`select v.id, v.availability::text as availability, v.thumbnail_url as "thumbnailUrl", v.title,
         v.duration_ms as "durationMs", v.published_at as "publishedAt", v.first_discovered_at as "firstDiscoveredAt",
         (v.creator_id is not null or v.creator_display_name is not null or v.creator_handle is not null) as "hasCreator",
-        exists(select 1 from metric_snapshots m where m.video_id = v.id) as "hasMetrics"
+        exists(select 1 from metric_snapshots m where m.video_id = v.id) as "hasMetrics",
+        exists(select 1 from scores s where s.video_id = v.id and s.value is not null) as "hasScore"
       from videos v where v.cluster_id = ${clusterId}::uuid`,
   );
 }
@@ -208,7 +215,46 @@ export async function mergeClusters(
         .where(eq(schema.classificationFailures.clusterId, A))
         .returning({ id: schema.classificationFailures.id })
     ).length,
+    acquisitionEvents: (
+      await tx
+        .update(schema.acquisitionEvents)
+        .set({
+          clusterId: S,
+          originClusterId: sql`coalesce(${schema.acquisitionEvents.originClusterId}, ${A}::uuid)`,
+        })
+        .where(eq(schema.acquisitionEvents.clusterId, A))
+        .returning({ id: schema.acquisitionEvents.id })
+    ).length,
   };
+  // Facts about the content carry over to the whole cluster, whichever side's
+  // record happens to be newer: used content stays used; obtained stays obtained.
+  const after = await clusterDecisionState(tx, S);
+  const inherited = { alreadyUsed: false, obtained: false };
+  if (
+    (sState.review === 'already_used' || aState.review === 'already_used') &&
+    after.review !== 'already_used'
+  ) {
+    await tx.insert(schema.reviewEvents).values({
+      clusterId: S,
+      status: 'already_used',
+      reviewer: 'system',
+      note: 'another representation of this clip was already used',
+      createdAt: input.now,
+    });
+    inherited.alreadyUsed = true;
+  }
+  if (
+    (sState.acquisition === 'obtained' || aState.acquisition === 'obtained') &&
+    after.acquisition !== 'obtained'
+  ) {
+    await tx.insert(schema.acquisitionEvents).values({
+      clusterId: S,
+      status: 'obtained',
+      note: 'obtained via another representation of this clip',
+      createdAt: input.now,
+    });
+    inherited.obtained = true;
+  }
   // Open suggestions between versions that now share the cluster are moot (machine
   // suggestions only — human decisions are never touched).
   const settled = await rows<{ id: string }>(
@@ -254,6 +300,7 @@ export async function mergeClusters(
         sides,
         moved,
         settledSuggestions: settled.length,
+        inherited,
         reviewReason: conflicts.reviewReason,
         rightsReason: conflicts.rightsReason,
         representative: {

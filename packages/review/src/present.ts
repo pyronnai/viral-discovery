@@ -31,6 +31,7 @@ export const REVIEW_LABELS: Record<string, string> = {
   rejected: 'Rejected',
   saved: 'Saved',
   already_used: 'Already used',
+  cleared: 'Removed from saved',
 };
 
 export const RIGHTS_LABELS: Record<string, string> = {
@@ -176,6 +177,29 @@ export interface CardView {
   review: { status: string | null; label: string; note: string | null };
   rights: { status: string; label: string };
   availabilityNote: string | null;
+  /** Inbox workflow state (saved ≠ obtained ≠ used). */
+  inbox: {
+    saved: boolean;
+    approved: boolean;
+    rejected: boolean;
+    used: boolean;
+    obtained: boolean;
+    obtainedAt: Date | null;
+    obtainedNote: string | null;
+  };
+  /** Confirmed representations; the representative (canonical) first. */
+  representations: {
+    videoId: string;
+    platform: string;
+    url: string;
+    creator: string | null;
+    isRepresentative: boolean;
+    mediaDownload: boolean;
+  }[];
+  /** Source link ≠ media download: a download is only claimed for an official asset. */
+  access: { sourceLink: true; mediaDownload: boolean; label: string };
+  duplicateStatus: string;
+  possibleDuplicateOfUsed: boolean;
 }
 
 export function toCardView(row: FeedRow, roles: SightingRoles, now: Date): CardView {
@@ -257,7 +281,48 @@ export function toCardView(row: FeedRow, roles: SightingRoles, now: Date): CardV
         : row.availability === 'private'
           ? 'Source reports this video is private'
           : null,
+    inbox: {
+      saved: row.reviewStatus === 'saved',
+      approved: row.reviewStatus === 'approved',
+      rejected: row.reviewStatus === 'rejected',
+      used: row.reviewStatus === 'already_used',
+      obtained: row.acquisitionStatus === 'obtained',
+      obtainedAt: row.acquisitionStatus === 'obtained' ? row.obtainedAt : null,
+      obtainedNote: row.acquisitionStatus === 'obtained' ? row.acquisitionNote : null,
+    },
+    representations: row.representations.map((r) => ({
+      videoId: r.videoId,
+      platform: platformName(r.platform),
+      url: r.url,
+      creator: r.creator,
+      isRepresentative: r.videoId === row.videoId,
+      mediaDownload: r.mediaDownload,
+    })),
+    access: {
+      sourceLink: true,
+      mediaDownload: row.mediaDownloadAvailable,
+      label: row.mediaDownloadAvailable
+        ? 'Source link · official download available'
+        : 'Source link only (no official download)',
+    },
+    duplicateStatus: duplicateStatus(row),
+    possibleDuplicateOfUsed: row.possibleDuplicateOfUsed,
   };
+}
+
+function duplicateStatus(
+  row: Pick<FeedRow, 'representations' | 'possibleDuplicates' | 'possibleDuplicateOfUsed'>,
+): string {
+  const parts: string[] = [];
+  const alternates = row.representations.length - 1;
+  if (alternates > 0)
+    parts.push(`${alternates} confirmed alternate representation${alternates === 1 ? '' : 's'}`);
+  if (row.possibleDuplicates)
+    parts.push(
+      `${row.possibleDuplicates} possible duplicate${row.possibleDuplicates === 1 ? '' : 's'} (unconfirmed)`,
+    );
+  if (row.possibleDuplicateOfUsed) parts.push('possibly the same clip as something already used');
+  return parts.length ? parts.join(' · ') : 'no duplicates detected';
 }
 
 /** Points for a small growth chart: the first metric with values across snapshots. */

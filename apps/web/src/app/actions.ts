@@ -5,7 +5,15 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { DuplicateError, confirmDuplicate, rejectDuplicate } from '@vd/dedupe';
 import { classifyCluster } from '@vd/pipeline';
-import { ReviewError, recordReview, setRights } from '@vd/review';
+import {
+  ReviewError,
+  bulkApply,
+  recordAcquisition,
+  recordReview,
+  setRights,
+  setSaved,
+  type BulkResult,
+} from '@vd/review';
 import { ACCESS_COOKIE, safeNext, sha256Hex, tokenMatches } from '../lib/access.ts';
 import { getContext } from '../lib/server.ts';
 
@@ -33,6 +41,58 @@ export async function reviewAction(
     return { ok: true, status: r.event.status };
   } catch (err) {
     return failure(err, 'could not save the review decision');
+  }
+}
+
+function refresh(clusterId?: string) {
+  revalidatePath('/');
+  if (clusterId) revalidatePath(`/candidates/${clusterId}`);
+}
+
+/** Save (shortlist) / Unsave. Unsave never undoes "already used" or "rejected". */
+export async function savedAction(clusterId: string, saved: boolean): Promise<ActionResult> {
+  try {
+    await setSaved(getContext().db, { clusterId, saved });
+    refresh(clusterId);
+    return { ok: true, status: saved ? 'saved' : 'unsaved' };
+  } catch (err) {
+    return failure(err, 'could not update saved');
+  }
+}
+
+/** Obtained (media obtained externally — tracking only) / not obtained. Never marks "used". */
+export async function obtainedAction(
+  clusterId: string,
+  obtained: boolean,
+  note?: string,
+  videoId?: string,
+): Promise<ActionResult> {
+  try {
+    await recordAcquisition(getContext().db, {
+      clusterId,
+      status: obtained ? 'obtained' : 'not_obtained',
+      note: note ?? null,
+      videoId: videoId ?? null,
+    });
+    refresh(clusterId);
+    return { ok: true, status: obtained ? 'obtained' : 'not_obtained' };
+  } catch (err) {
+    return failure(err, 'could not update obtained');
+  }
+}
+
+/** Bulk save / obtained / used / reject (the UI confirms broad actions first). */
+export async function bulkAction(
+  clusterIds: string[],
+  action: string,
+): Promise<{ ok: true; result: BulkResult } | { ok: false; error: string }> {
+  try {
+    const result = await bulkApply(getContext().db, { clusterIds, action });
+    refresh();
+    return { ok: true, result };
+  } catch (err) {
+    const f = failure(err, 'bulk action failed');
+    return f.ok ? { ok: false, error: 'bulk action failed' } : f;
   }
 }
 

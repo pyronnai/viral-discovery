@@ -10,9 +10,16 @@
  * latest carried-over record).
  */
 import { and, desc, eq } from 'drizzle-orm';
-import { REVIEW_STATUSES, RIGHTS_STATUSES, type ReviewStatus, type RightsStatus } from '@vd/core';
+import {
+  ACQUISITION_STATUSES,
+  REVIEW_STATUSES,
+  RIGHTS_STATUSES,
+  type AcquisitionStatus,
+  type ReviewStatus,
+  type RightsStatus,
+} from '@vd/core';
 import { schema, type AnyDatabase } from '@vd/db';
-import { clusterDecisionState } from '@vd/dedupe';
+import { clusterDecisionState, resolveCluster } from '@vd/dedupe';
 
 export class ReviewError extends Error {
   constructor(message: string) {
@@ -144,4 +151,145 @@ export async function setRights(db: AnyDatabase, input: RightsInput) {
     .returning();
   if (!record) throw new ReviewError('rights were not saved');
   return { record, created: true };
+}
+
+// ── inbox workflow ──────────────────────────────────────────────────────────
+
+/**
+ * Save puts the cluster on the shortlist. Unsave removes it ("cleared": no current
+ * decision) — only if it is currently saved, so Unsave never undoes "already used"
+ * or "rejected".
+ */
+export async function setSaved(
+  db: AnyDatabase,
+  input: { clusterId: string; saved: boolean; note?: string | null; now?: Date },
+) {
+  if (input.saved) {
+    return recordReview(db, {
+      clusterId: input.clusterId,
+      status: 'saved',
+      note: input.note ?? null,
+      ...(input.now ? { now: input.now } : {}),
+    });
+  }
+  await assertCluster(db, input.clusterId);
+  const state = await clusterDecisionState(db, input.clusterId);
+  if (state.review !== 'saved') return { event: null, created: false };
+  return recordReview(db, {
+    clusterId: input.clusterId,
+    status: 'cleared',
+    note: input.note ?? null,
+    ...(input.now ? { now: input.now } : {}),
+  });
+}
+
+export interface AcquisitionInput {
+  clusterId: string;
+  status: string;
+  note?: string | null;
+  /** Optional: which representation (video) the media was obtained from. */
+  videoId?: string | null;
+  now?: Date;
+}
+
+/**
+ * Records whether the operator obtained the source media EXTERNALLY. Tracking only —
+ * nothing is downloaded, and obtaining never marks the clip "already used".
+ * Append-only and idempotent for an unchanged record.
+ */
+export async function recordAcquisition(db: AnyDatabase, input: AcquisitionInput) {
+  if (!(ACQUISITION_STATUSES as readonly string[]).includes(input.status)) {
+    throw new ReviewError(`unknown acquisition status "${input.status}"`);
+  }
+  const status = input.status as AcquisitionStatus;
+  const note = cleanNote(input.note);
+  await assertCluster(db, input.clusterId);
+  let videoId: string | null = null;
+  if (input.videoId) {
+    const [v] = await db
+      .select({ id: schema.videos.id })
+      .from(schema.videos)
+      .where(
+        and(eq(schema.videos.id, input.videoId), eq(schema.videos.clusterId, input.clusterId)),
+      );
+    if (!v) throw new ReviewError('that representation does not belong to this candidate');
+    videoId = v.id;
+  }
+  const [latest] = await db
+    .select()
+    .from(schema.acquisitionEvents)
+    .where(eq(schema.acquisitionEvents.clusterId, input.clusterId))
+    .orderBy(desc(schema.acquisitionEvents.createdAt), desc(schema.acquisitionEvents.id))
+    .limit(1);
+  if (latest && latest.status === status && latest.note === note && latest.videoId === videoId) {
+    return { event: latest, created: false };
+  }
+  const [event] = await db
+    .insert(schema.acquisitionEvents)
+    .values({
+      clusterId: input.clusterId,
+      status,
+      note,
+      videoId,
+      createdAt: input.now ?? new Date(),
+    })
+    .returning();
+  if (!event) throw new ReviewError('acquisition was not saved');
+  return { event, created: true };
+}
+
+export const BULK_ACTIONS = ['save', 'obtained', 'used', 'reject'] as const;
+export type BulkAction = (typeof BULK_ACTIONS)[number];
+/** Actions that remove candidates from the inbox; the UI asks for confirmation. */
+export const BROAD_BULK_ACTIONS: readonly BulkAction[] = ['used', 'reject'];
+export const MAX_BULK = 200;
+
+export interface BulkResult {
+  action: BulkAction;
+  applied: string[];
+  unchanged: string[];
+  failed: { clusterId: string; error: string }[];
+}
+
+/**
+ * Applies one action to many candidates. Ids of merged-away candidates resolve to
+ * the surviving cluster and duplicates collapse, so one underlying clip is touched
+ * once. Each item is independent and idempotent; failures are reported, not thrown.
+ */
+export async function bulkApply(
+  db: AnyDatabase,
+  input: { clusterIds: string[]; action: string; now?: Date },
+): Promise<BulkResult> {
+  if (!(BULK_ACTIONS as readonly string[]).includes(input.action)) {
+    throw new ReviewError(`unknown bulk action "${input.action}"`);
+  }
+  const action = input.action as BulkAction;
+  if (input.clusterIds.length > MAX_BULK)
+    throw new ReviewError(`at most ${MAX_BULK} candidates at once`);
+  const result: BulkResult = { action, applied: [], unchanged: [], failed: [] };
+  const seen = new Set<string>();
+  for (const raw of input.clusterIds) {
+    const clusterId = await resolveCluster(db, raw);
+    if (!clusterId) {
+      result.failed.push({ clusterId: raw, error: 'candidate not found' });
+      continue;
+    }
+    if (seen.has(clusterId)) continue;
+    seen.add(clusterId);
+    try {
+      const now = input.now ? { now: input.now } : {};
+      const r =
+        action === 'obtained'
+          ? await recordAcquisition(db, { clusterId, status: 'obtained', ...now })
+          : await recordReview(db, {
+              clusterId,
+              status: action === 'save' ? 'saved' : action === 'used' ? 'already_used' : 'rejected',
+              ...now,
+            });
+      (r.created ? result.applied : result.unchanged).push(clusterId);
+    } catch (err) {
+      result.failed.push({ clusterId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return result;
 }

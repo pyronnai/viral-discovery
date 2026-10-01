@@ -1,93 +1,122 @@
 import Link from 'next/link';
-import { CONTENT_LABELS } from '@vd/classification';
 import { RIGHTS_STATUSES } from '@vd/core';
 import {
-  BREAKING_OUT_SCORE,
-  REVIEW_LABELS,
   RIGHTS_LABELS,
   STATE_LABELS,
+  VIRAL_NOW_HOURS,
   getFeed,
   getFilterOptions,
   getSummary,
   toCardView,
   type FeedFilters,
+  type FeedSort,
+  type InboxView,
 } from '@vd/review';
+import { BulkBar } from '../components/BulkBar.tsx';
 import { CandidateCard } from '../components/CandidateCard.tsx';
-import { feedHref, hasFilters, parseFilters, type SearchParams } from '../lib/filters.ts';
+import {
+  effectiveView,
+  feedHref,
+  hasFilters,
+  parseFilters,
+  parseSort,
+  type SearchParams,
+} from '../lib/filters.ts';
 import { getContext } from '../lib/server.ts';
 
 export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 25;
 
-export default async function FeedPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+const QUICK_LABELS = ['funny', 'animals', 'fails', 'reactions', 'memes', 'unexpected'] as const;
+
+const SORT_LABELS: Record<FeedSort, string> = {
+  virality: 'Virality',
+  newest: 'Newest',
+  growth: 'Fastest growing',
+  views: 'Most viewed',
+  discovered: 'Recently discovered',
+};
+
+const EMPTY: Record<InboxView, string> = {
+  viral: `Nothing fresh is breaking out right now (last ${VIRAL_NOW_HOURS}h, untriaged). Check Unreviewed, or Discovery health.`,
+  unreviewed: 'Inbox zero — every candidate has a decision.',
+  saved: 'Nothing saved yet. Use ☆ Save on a card to build your shortlist.',
+  obtained: 'Nothing marked obtained (and not yet used).',
+  used: 'Nothing marked as already used yet.',
+  rejected: 'Nothing rejected.',
+  all: 'No candidates match these filters.',
+};
+
+export default async function InboxPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
-  const filters = parseFilters(params);
+  const parsed = parseFilters(params);
+  const view = effectiveView(parsed);
+  const filters: FeedFilters = { ...parsed, view };
+  const sort = parseSort(params);
   const cursor = typeof params['cursor'] === 'string' ? params['cursor'] : null;
   const ctx = getContext();
   const now = new Date();
   const [summary, page, options] = await Promise.all([
-    getSummary(ctx.db),
-    getFeed(ctx.db, { filters, cursor, pageSize: PAGE_SIZE, now }),
+    getSummary(ctx.db, now),
+    getFeed(ctx.db, { filters, sort, cursor, pageSize: PAGE_SIZE, now }),
     getFilterOptions(ctx.db),
   ]);
   const cards = page.items.map((row) => toCardView(row, ctx.roles, now));
+  const exportQuery = feedHref(filters, null, sort).replace(/^\/\??/, '');
 
-  const bucket = (label: string, count: number, f: FeedFilters, emoji: string) => (
-    <Link href={feedHref(f)} className="bucket">
-      <span className="bucket-emoji">{emoji}</span>
-      <span className="bucket-count">{count}</span>
-      <span className="bucket-label">{label}</span>
+  const tab = (v: InboxView, label: string, count: number | null) => (
+    <Link
+      href={feedHref({ view: v }, null, sort)}
+      className={`tab${view === v ? ' tab-active' : ''}`}
+      aria-current={view === v ? 'page' : undefined}
+    >
+      {label}
+      {count !== null ? <span className="tab-count">{count}</span> : null}
     </Link>
   );
 
   return (
     <>
-      <nav className="summary" aria-label="Review summary">
-        {bucket(
-          'Breaking out',
-          summary.breakingOut,
-          { state: 'scored', minScore: BREAKING_OUT_SCORE },
-          '🔥',
-        )}
-        {bucket('Unreviewed', summary.unreviewed, { review: 'unreviewed' }, '👀')}
-        {bucket('Saved', summary.saved, { review: 'saved' }, '⭐')}
-        {bucket('Approved', summary.approved, { review: 'approved' }, '✅')}
-        {bucket('Rejected', summary.rejected, { review: 'rejected' }, '⛔')}
-        {bucket(
-          'Insufficient evidence',
-          summary.insufficientEvidence,
-          { state: 'insufficient_evidence' },
-          '❔',
-        )}
-        {bucket('Flagged', summary.flagged, { flagged: true }, '⚠')}
-        {bucket(
-          'Possible duplicates',
-          summary.possibleDuplicates,
-          { possibleDuplicates: true },
-          '⧉',
-        )}
-        {summary.conflicts
-          ? bucket('Merge conflicts', summary.conflicts, { review: 'conflict' }, '⚖')
-          : null}
+      <nav className="tabs" aria-label="Inbox views">
+        {tab('viral', '🔥 Viral Now', summary.viralNow)}
+        {tab('unreviewed', '👀 Unreviewed', summary.unreviewed)}
+        {tab('saved', '★ Saved', summary.saved)}
+        {tab('obtained', '⬇ Obtained', summary.obtained)}
+        {tab('used', '✓ Already used', summary.alreadyUsed)}
+        {tab('rejected', 'Rejected', summary.rejected)}
+        {tab('all', 'All', summary.total)}
+        {summary.possibleDuplicates ? (
+          <Link href={feedHref({ view: 'all', possibleDuplicates: true })} className="tab tab-warn">
+            ⧉ {summary.possibleDuplicates} possible duplicates
+          </Link>
+        ) : null}
+        {summary.conflicts ? (
+          <Link href={feedHref({ view: 'all', review: 'conflict' })} className="tab tab-warn">
+            ⚖ {summary.conflicts} merge conflicts
+          </Link>
+        ) : null}
+      </nav>
+
+      <nav className="chips" aria-label="Quick category filters">
+        {QUICK_LABELS.map((l) => (
+          <Link
+            key={l}
+            href={feedHref({ ...filters, label: filters.label === l ? undefined : l }, null, sort)}
+            className={`chip${filters.label === l ? ' chip-active' : ''}`}
+          >
+            {l}
+          </Link>
+        ))}
       </nav>
 
       <form className="filters" method="get" action="/">
-        <select name="review" defaultValue={filters.review ?? ''} aria-label="Review status">
-          <option value="">Any review</option>
-          <option value="unreviewed">Unreviewed only</option>
-          <option value="conflict">Merge conflict</option>
-          {Object.entries(REVIEW_LABELS).map(([v, l]) => (
+        <input type="hidden" name="view" value={view} />
+        {filters.label ? <input type="hidden" name="label" value={filters.label} /> : null}
+        <select name="sort" defaultValue={sort} aria-label="Sort">
+          {Object.entries(SORT_LABELS).map(([v, l]) => (
             <option key={v} value={v}>
-              {l}
-            </option>
-          ))}
-        </select>
-        <select name="label" defaultValue={filters.label ?? ''} aria-label="Category">
-          <option value="">Any category</option>
-          {CONTENT_LABELS.map((l) => (
-            <option key={l} value={l}>
-              {l}
+              Sort: {l}
             </option>
           ))}
         </select>
@@ -103,30 +132,6 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
             </option>
           ))}
         </select>
-        <select name="source" defaultValue={filters.source ?? ''} aria-label="Discovery source">
-          <option value="">Any source</option>
-          {options.sources.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <select name="state" defaultValue={filters.state ?? ''} aria-label="Score state">
-          <option value="">Any score state</option>
-          {Object.entries(STATE_LABELS).map(([v, l]) => (
-            <option key={v} value={v}>
-              {l.toLowerCase()}
-            </option>
-          ))}
-        </select>
-        <select name="rights" defaultValue={filters.rights ?? ''} aria-label="Rights status">
-          <option value="">Any rights</option>
-          {[...RIGHTS_STATUSES, 'conflict' as const].map((r) => (
-            <option key={r} value={r}>
-              {RIGHTS_LABELS[r]}
-            </option>
-          ))}
-        </select>
         <input
           name="minScore"
           type="number"
@@ -134,42 +139,76 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
           max={100}
           placeholder="Min score"
           defaultValue={filters.minScore ?? ''}
-          aria-label="Minimum score"
+          aria-label="Minimum virality score"
         />
         <select
           name="within"
           defaultValue={filters.discoveredWithinHours ? String(filters.discoveredWithinHours) : ''}
           aria-label="Discovered within"
         >
-          <option value="">Any time</option>
+          <option value="">Any freshness</option>
           <option value="6">Last 6h</option>
           <option value="24">Last 24h</option>
           <option value="72">Last 3 days</option>
           <option value="168">Last 7 days</option>
         </select>
-        <label className="check">
-          <input
-            type="checkbox"
-            name="flagged"
-            value="1"
-            defaultChecked={filters.flagged ?? false}
-          />{' '}
-          flagged
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            name="dups"
-            value="1"
-            defaultChecked={filters.possibleDuplicates ?? false}
-          />{' '}
-          possible duplicates
-        </label>
+        <input
+          name="creator"
+          placeholder="Creator or @handle"
+          defaultValue={filters.creator ?? ''}
+          aria-label="Creator"
+          maxLength={80}
+        />
+        <select name="rights" defaultValue={filters.rights ?? ''} aria-label="Rights status">
+          <option value="">Any rights</option>
+          {[...RIGHTS_STATUSES, 'conflict' as const].map((r) => (
+            <option key={r} value={r}>
+              Rights: {RIGHTS_LABELS[r]}
+            </option>
+          ))}
+        </select>
+        <details className="more-filters">
+          <summary>More</summary>
+          <select name="source" defaultValue={filters.source ?? ''} aria-label="Discovery source">
+            <option value="">Any source</option>
+            {options.sources.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <select name="state" defaultValue={filters.state ?? ''} aria-label="Score state">
+            <option value="">Any score state</option>
+            {Object.entries(STATE_LABELS).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l.toLowerCase()}
+              </option>
+            ))}
+          </select>
+          <label className="check">
+            <input
+              type="checkbox"
+              name="flagged"
+              value="1"
+              defaultChecked={filters.flagged ?? false}
+            />{' '}
+            flagged
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              name="dups"
+              value="1"
+              defaultChecked={filters.possibleDuplicates ?? false}
+            />{' '}
+            possible duplicates
+          </label>
+        </details>
         <button className="btn" type="submit">
           Apply
         </button>
-        {hasFilters(filters) ? (
-          <Link href="/" className="small">
+        {hasFilters(filters) || sort !== 'virality' ? (
+          <Link href={feedHref({ view })} className="small">
             Clear
           </Link>
         ) : null}
@@ -177,9 +216,12 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
 
       {!ctx.classifier.configured ? (
         <p className="notice">
-          Content classification is off ({ctx.classifier.reason}). Candidates show as Unclassified.
+          Content labels are off ({ctx.classifier.reason}). Candidates show as Unclassified; scores
+          and the inbox still work.
         </p>
       ) : null}
+
+      <BulkBar exportQuery={exportQuery} />
 
       {cards.length === 0 ? (
         <div className="empty">
@@ -187,14 +229,15 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
             <>
               <h2>No candidates yet</h2>
               <p>
-                Run discovery (e.g. <code>pnpm cli discover bluesky --param q=funny</code>) or
-                submit a URL.
+                Run discovery (e.g. <code>pnpm cli tick</code> or{' '}
+                <code>pnpm cli discover bluesky --param q=funny</code>) or submit a URL. See{' '}
+                <Link href="/health">Discovery health</Link>.
               </p>
             </>
           ) : (
             <>
-              <h2>No candidates match these filters</h2>
-              <Link href="/">Clear filters</Link>
+              <h2>{EMPTY[view]}</h2>
+              {hasFilters(filters) ? <Link href={feedHref({ view })}>Clear filters</Link> : null}
             </>
           )}
         </div>
@@ -207,9 +250,9 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
       )}
 
       <div className="pager">
-        {cursor ? <Link href={feedHref(filters)}>↑ First page</Link> : null}
+        {cursor ? <Link href={feedHref(filters, null, sort)}>↑ First page</Link> : null}
         {page.nextCursor ? (
-          <Link className="btn" href={feedHref(filters, page.nextCursor)}>
+          <Link className="btn" href={feedHref(filters, page.nextCursor, sort)}>
             Next {PAGE_SIZE} →
           </Link>
         ) : null}

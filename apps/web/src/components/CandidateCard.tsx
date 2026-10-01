@@ -1,15 +1,42 @@
 import Link from 'next/link';
 import type { CardView } from '@vd/review';
-import { ReviewControls } from './ReviewControls.tsx';
 import { DuplicateIndicator } from './Duplicates.tsx';
 import { ScoreBadge, ScoreBreakdown, SourcesBlock } from './Evidence.tsx';
+import { InboxActions } from './InboxActions.tsx';
+import { Representations, StateBadges } from './Representations.tsx';
 import { Thumbnail } from './Thumbnail.tsx';
 
-/** Compact, scannable card: thumbnail | metadata | virality | labels | actions. */
+/**
+ * Compact inbox card, optimized for scanning many videos:
+ * select | thumbnail | who/what/when + labels + metrics + state + sources | score | actions.
+ */
 export function CandidateCard({ card }: { card: CardView }) {
   const significant = card.flags.filter((f) => f.significant);
+  const metrics = card.metrics
+    ? (
+        [
+          ['views', card.metrics.views],
+          ['likes', card.metrics.likes],
+          ['comments', card.metrics.comments],
+          ['shares', card.metrics.shares],
+        ] as const
+      )
+        // Only metrics the platform actually provided; unavailable ones are omitted.
+        .filter(([, value]) => value !== '—')
+        .map(([name, value]) => `${value} ${name}`)
+        .join(' · ')
+    : null;
   return (
-    <article className={`card${significant.length ? ' card-flagged' : ''}`}>
+    <article
+      className={`card${significant.length ? ' card-flagged' : ''}${card.inbox.used ? ' card-used' : ''}`}
+    >
+      <input
+        type="checkbox"
+        className="card-select"
+        data-select-cluster
+        value={card.clusterId}
+        aria-label={`Select ${card.title}`}
+      />
       <Link href={card.href} className="card-thumb" aria-label={`Open details: ${card.title}`}>
         <Thumbnail src={card.thumbnailUrl} alt={card.title} platform={card.platform} />
         <span className="duration">{card.duration}</span>
@@ -18,7 +45,13 @@ export function CandidateCard({ card }: { card: CardView }) {
       <div className="card-main">
         <div className="card-meta">
           <span className="platform">{card.platform}</span>
-          <span>{card.creator ?? 'unknown creator'}</span>
+          <Link
+            href={`/?view=all&creator=${encodeURIComponent(card.creatorHandle ?? card.creator ?? '')}`}
+            className="creator"
+            title="All candidates from this creator"
+          >
+            {card.creator ?? 'unknown creator'}
+          </Link>
           {card.creatorHandle ? <span className="muted">@{card.creatorHandle}</span> : null}
           <span
             className="muted"
@@ -31,6 +64,7 @@ export function CandidateCard({ card }: { card: CardView }) {
             {card.age}
             {card.ageBasis === 'discovered' ? '*' : ''} old
           </span>
+          <StateBadges inbox={card.inbox} conflict={card.conflicts.review} />
         </div>
         <Link href={card.href} className="card-title">
           {card.title}
@@ -38,9 +72,14 @@ export function CandidateCard({ card }: { card: CardView }) {
         <div className="labels">
           {card.classification.kind === 'classified' ? (
             card.classification.labels.map((l) => (
-              <span key={l.label} className="label" title={`confidence ${l.confidence.toFixed(2)}`}>
+              <Link
+                key={l.label}
+                href={`/?label=${l.label}`}
+                className="label"
+                title={`confidence ${l.confidence.toFixed(2)}`}
+              >
                 {l.label}
-              </span>
+              </Link>
             ))
           ) : card.classification.kind === 'failed' ? (
             <span className="label label-warn">
@@ -56,34 +95,32 @@ export function CandidateCard({ card }: { card: CardView }) {
           ))}
         </div>
         <div className="card-facts">
-          {card.metrics ? (
-            <span>
-              {/* Only metrics the platform actually provided; unavailable ones are omitted. */}
-              {(
-                [
-                  ['views', card.metrics.views],
-                  ['likes', card.metrics.likes],
-                  ['comments', card.metrics.comments],
-                  ['shares', card.metrics.shares],
-                ] as const
-              )
-                .filter(([, value]) => value !== '—')
-                .map(([name, value]) => `${value} ${name}`)
-                .join(' · ')}
-            </span>
-          ) : (
-            <span className="muted">no canonical metrics</span>
-          )}
-          <span className={`rights rights-${card.rights.status}`}>Rights: {card.rights.label}</span>
+          {metrics ? <span>{metrics}</span> : <span className="muted">no canonical metrics</span>}
+          <span
+            className={`rights rights-${card.rights.status}`}
+            title="Unknown rights are not permission"
+          >
+            Rights: {card.rights.label}
+          </span>
           <DuplicateIndicator
             href={card.href}
             label={card.duplicatesLabel}
             versionPlatforms={card.versionPlatforms}
           />
+          {card.possibleDuplicateOfUsed ? (
+            <span className="warn">⚠ possibly the same clip as something already used</span>
+          ) : null}
           {card.availabilityNote ? <span className="warn">{card.availabilityNote}</span> : null}
         </div>
+        <Representations
+          representations={card.representations}
+          canonicalUrl={card.canonicalUrl}
+          platform={card.platform}
+          access={card.access}
+          compact
+        />
         <details className="why">
-          <summary>Details / Why?</summary>
+          <summary>Why is this here?</summary>
           <div className="why-body">
             <SourcesBlock
               platform={card.platform}
@@ -97,12 +134,6 @@ export function CandidateCard({ card }: { card: CardView }) {
                 <span className="ai-tag">AI content analysis</span> {card.aiSummary}
               </p>
             ) : null}
-            <div className="links">
-              <Link href={card.href}>Full details →</Link>
-              <a href={card.canonicalUrl} target="_blank" rel="noopener noreferrer">
-                Open original ↗
-              </a>
-            </div>
           </div>
         </details>
       </div>
@@ -115,19 +146,10 @@ export function CandidateCard({ card }: { card: CardView }) {
       />
 
       <div className="card-actions">
-        <ReviewControls
-          clusterId={card.clusterId}
-          status={card.review.status}
-          conflict={card.conflicts.review}
-        />
-        <a
-          className="open-original"
-          href={card.canonicalUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Open original ↗
-        </a>
+        <InboxActions clusterId={card.clusterId} state={card.inbox} />
+        <Link href={card.href} className="small">
+          Details →
+        </Link>
       </div>
     </article>
   );

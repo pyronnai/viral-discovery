@@ -27,6 +27,8 @@ export interface ClusterDecisionState {
   rightsHolder: string | null;
   rightsAt: Date | null;
   rightsConflict: boolean;
+  /** Latest acquisition status ('obtained' | 'not_obtained'), or null. */
+  acquisition: string | null;
   /** Any review event or rights record exists (human involvement). */
   hasHumanDecisions: boolean;
 }
@@ -45,6 +47,7 @@ export async function clusterDecisionState(
     rightsConflictAt: Date | null;
     reviewCount: number;
     rightsCount: number;
+    acquisition: string | null;
   }>(
     db,
     sql`select
@@ -53,7 +56,9 @@ export async function clusterDecisionState(
       rt.status::text as rights, rt.rights_holder as "rightsHolder", rt.created_at as "rightsAt",
       (select max(merged_at) from cluster_merges where survivor_cluster_id = ${clusterId}::uuid and rights_conflict) as "rightsConflictAt",
       (select count(*)::int from review_events where cluster_id = ${clusterId}::uuid) as "reviewCount",
-      (select count(*)::int from rights where cluster_id = ${clusterId}::uuid) as "rightsCount"
+      (select count(*)::int from rights where cluster_id = ${clusterId}::uuid) as "rightsCount",
+      (select status::text from acquisition_events where cluster_id = ${clusterId}::uuid
+        order by created_at desc, id desc limit 1) as acquisition
     from (select 1) one
     left join lateral (
       select status, created_at from review_events where cluster_id = ${clusterId}::uuid
@@ -70,13 +75,15 @@ export async function clusterDecisionState(
   const reviewConflict = open(row?.reviewConflictAt ?? null, row?.reviewAt ?? null);
   const rightsConflict = open(row?.rightsConflictAt ?? null, row?.rightsAt ?? null);
   return {
-    review: row?.review ?? null,
+    // "cleared" (unsaved) means no current decision.
+    review: row?.review === 'cleared' ? null : (row?.review ?? null),
     reviewAt: row?.reviewAt ?? null,
     reviewConflict,
     rights: row?.rights ?? null,
     rightsHolder: row?.rightsHolder ?? null,
     rightsAt: row?.rightsAt ?? null,
     rightsConflict,
+    acquisition: row?.acquisition ?? null,
     hasHumanDecisions: (row?.reviewCount ?? 0) + (row?.rightsCount ?? 0) > 0,
   };
 }
@@ -108,7 +115,10 @@ export interface MergeConflicts {
  */
 export function mergeConflicts(a: ClusterDecisionState, b: ClusterDecisionState): MergeConflicts {
   let reviewReason: string | null = null;
-  if (a.reviewConflict || b.reviewConflict)
+  // "Already used" is a fact about the content, not a judgment: it always wins, so
+  // a repost on another platform can never make used content look fresh again.
+  if (a.review === 'already_used' || b.review === 'already_used') reviewReason = null;
+  else if (a.reviewConflict || b.reviewConflict)
     reviewReason = 'an unresolved review conflict carried over';
   else if (a.review && b.review && a.review !== b.review)
     reviewReason = `different decisions (${a.review} vs ${b.review})`;
