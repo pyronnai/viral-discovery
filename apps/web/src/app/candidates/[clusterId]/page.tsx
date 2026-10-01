@@ -1,16 +1,26 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { ANALYSIS_FIELDS, type AnalysisField } from '@vd/classification';
 import {
   REVIEW_LABELS,
   componentViews,
+  conflictViews,
   formatCount,
   getCandidate,
   growthSeries,
+  mergedInto,
+  platformName,
   splitSources,
   toCardView,
+  toDuplicateView,
+  versionViews,
 } from '@vd/review';
 import { ClassifyButton } from '../../../components/ClassifyButton.tsx';
+import {
+  ConflictBanner,
+  PossibleDuplicates,
+  VersionsTable,
+} from '../../../components/Duplicates.tsx';
 import {
   ScoreBadge,
   ScoreBreakdown,
@@ -48,13 +58,25 @@ export default async function CandidatePage({
   const { clusterId } = await params;
   const ctx = getContext();
   const detail = await getCandidate(ctx.db, clusterId);
-  if (!detail) notFound();
+  if (!detail) {
+    // A merged-away candidate redirects to the cluster that now holds its versions.
+    const into = await mergedInto(ctx.db, clusterId);
+    if (into) redirect(`/candidates/${into}`);
+    notFound();
+  }
   const now = new Date();
   const card = toCardView(detail.summary, ctx.roles, now);
   const latestScore = detail.scores[0] ?? null;
   const classification = detail.classifications.find((c) => c.current) ?? null;
   const series = growthSeries(detail.snapshots);
   const sightingSources = splitSources(detail.summary.sources, ctx.roles);
+  const versions = versionViews(detail);
+  const duplicates = detail.possibleDuplicates.map(toDuplicateView);
+  const rejected = detail.rejectedDuplicates.map(toDuplicateView);
+  const conflicts = conflictViews(detail.summary, detail.merges);
+  const versionPlatform = new Map(
+    detail.versions.map((v) => [v.videoId, platformName(v.platform)]),
+  );
 
   return (
     <article className="detail">
@@ -78,7 +100,12 @@ export default async function CandidatePage({
             </a>{' '}
             <span className="muted small">{card.canonicalUrl}</span>
           </p>
-          <ReviewControls clusterId={clusterId} status={card.review.status} withNote />
+          <ReviewControls
+            clusterId={clusterId}
+            status={card.review.status}
+            conflict={card.conflicts.review}
+            withNote
+          />
         </div>
         <ScoreBadge
           text={card.score.text}
@@ -88,6 +115,8 @@ export default async function CandidatePage({
         />
       </div>
 
+      <ConflictBanner conflicts={conflicts} />
+
       <section>
         <h2>Virality evidence</h2>
         <p className="muted small">
@@ -95,6 +124,9 @@ export default async function CandidatePage({
           metrics and sightings, not from AI analysis.
           {latestScore?.nextRescoreAt
             ? ` Next time-based rescore: ${fmt(latestScore.nextRescoreAt)}.`
+            : ''}
+          {versions.length > 1
+            ? ` Metrics and score are the representative version's (${card.platform}).`
             : ''}
         </p>
         <ScoreBreakdown components={componentViews(latestScore?.components ?? null)} />
@@ -107,6 +139,32 @@ export default async function CandidatePage({
           provenance={sightingSources.provenance}
           versions={card.versions}
         />
+      </section>
+
+      <section>
+        <h2>Versions / representations</h2>
+        <VersionsTable versions={versions} />
+      </section>
+
+      <section id="duplicates">
+        <h2>
+          Possible duplicates{' '}
+          <span className="ai-tag">detector suggestions — nothing is shared until confirmed</span>
+        </h2>
+        <PossibleDuplicates clusterId={clusterId} duplicates={duplicates} />
+        {rejected.length ? (
+          <details className="small">
+            <summary>{rejected.length} marked not the same</summary>
+            <ul className="history">
+              {rejected.map((d) => (
+                <li key={d.candidateId}>
+                  {fmt(d.decidedAt)} — {d.platform} “{d.title}” ({d.confidenceText})
+                  {d.note ? ` · ${d.note}` : ''}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </section>
 
       <section>
@@ -257,7 +315,10 @@ export default async function CandidatePage({
           <strong>{card.review.label}</strong>{' '}
           <span className="muted small">(approval does not imply rights clearance)</span>
         </p>
-        <RightsForm clusterId={clusterId} current={card.rights.status} />
+        <RightsForm
+          clusterId={clusterId}
+          current={card.conflicts.rights ? 'unknown' : card.rights.status}
+        />
         {detail.rights.length ? (
           <ul className="history">
             {detail.rights.map((r) => (
@@ -274,6 +335,9 @@ export default async function CandidatePage({
                   </>
                 ) : null}
                 {r.notes ? ` · ${r.notes}` : ''}
+                {r.originClusterId ? (
+                  <span className="muted"> · carried over from a merged version</span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -291,22 +355,38 @@ export default async function CandidatePage({
                 {fmt(r.createdAt)} — <strong>{REVIEW_LABELS[r.status] ?? r.status}</strong> by{' '}
                 {r.reviewer}
                 {r.note ? ` · “${r.note}”` : ''}
+                {r.originClusterId ? (
+                  <span className="muted"> · carried over from a merged version</span>
+                ) : null}
               </li>
             ))}
           </ul>
         )}
+        {detail.merges.length ? (
+          <ul className="history">
+            {detail.merges.map((m) => (
+              <li key={m.id}>
+                {fmt(m.mergedAt)} — merged another version into this candidate (
+                {m.trigger === 'auto' ? 'auto-confirmed by detector' : 'confirmed by owner'})
+                {m.reviewConflict ? ' · review conflict' : ''}
+                {m.rightsConflict ? ' · rights conflict' : ''}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       <section>
         <h2>Sightings</h2>
         <p className="small muted">
-          Clustering is exact-identity only for now: {detail.versions.length} version(s) in this
-          cluster.
+          Where each version was observed. Sightings of confirmed versions stay sightings; they are
+          not separate viral discoveries.
         </p>
         <table className="table">
           <thead>
             <tr>
               <th>Seen</th>
+              <th>Version</th>
               <th>Source</th>
               <th>Role</th>
               <th>Observation</th>
@@ -320,6 +400,7 @@ export default async function CandidatePage({
               return (
                 <tr key={`${s.source}-${s.observationKey}-${new Date(s.seenAt).toISOString()}`}>
                   <td>{fmt(s.seenAt)}</td>
+                  <td>{versionPlatform.get(s.videoId) ?? '—'}</td>
                   <td>{s.source}</td>
                   <td>{role}</td>
                   <td>

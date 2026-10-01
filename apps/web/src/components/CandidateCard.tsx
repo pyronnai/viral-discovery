@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { CardView } from '@vd/review';
 import { ReviewControls } from './ReviewControls.tsx';
+import { DuplicateIndicator } from './Duplicates.tsx';
 import { ScoreBadge, ScoreBreakdown, SourcesBlock } from './Evidence.tsx';
 import { Thumbnail } from './Thumbnail.tsx';
 
@@ -74,6 +75,11 @@ export function CandidateCard({ card }: { card: CardView }) {
             <span className="muted">no canonical metrics</span>
           )}
           <span className={`rights rights-${card.rights.status}`}>Rights: {card.rights.label}</span>
+          <DuplicateIndicator
+            href={card.href}
+            label={card.duplicatesLabel}
+            versionPlatforms={card.versionPlatforms}
+          />
           {card.availabilityNote ? <span className="warn">{card.availabilityNote}</span> : null}
         </div>
         <details className="why">
@@ -109,7 +115,11 @@ export function CandidateCard({ card }: { card: CardView }) {
       />
 
       <div className="card-actions">
-        <ReviewControls clusterId={card.clusterId} status={card.review.status} />
+        <ReviewControls
+          clusterId={card.clusterId}
+          status={card.review.status}
+          conflict={card.conflicts.review}
+        />
         <a
           className="open-original"
           href={card.canonicalUrl}

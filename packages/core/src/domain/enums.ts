@@ -80,3 +80,14 @@ export type VideoAvailability = z.infer<typeof VideoAvailabilitySchema>;
 export const SCORE_STATES = ['scored', 'provisional', 'insufficient_evidence'] as const;
 export const ScoreStateSchema = z.enum(SCORE_STATES);
 export type ScoreState = z.infer<typeof ScoreStateSchema>;
+
+/**
+ * Near-duplicate relationship between two videos with DIFFERENT exact identities.
+ * - possible:       detector evidence suggests the same underlying clip; nothing is shared.
+ * - auto_confirmed: strong multi-signal evidence; the detector merged the clusters.
+ * - confirmed:      a human confirmed "same video"; the clusters were merged.
+ * - rejected:       a human said "not the same"; never resurfaced automatically.
+ */
+export const DUPLICATE_STATUSES = ['possible', 'auto_confirmed', 'confirmed', 'rejected'] as const;
+export const DuplicateStatusSchema = z.enum(DUPLICATE_STATUSES);
+export type DuplicateStatus = z.infer<typeof DuplicateStatusSchema>;

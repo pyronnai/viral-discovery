@@ -34,7 +34,7 @@ async function run(impl: PipelineImpl, name: string, data: unknown) {
 }
 
 describe('pipeline job handlers', () => {
-  it('registers classify-cluster, discover-source, refresh-metrics, and score-video', async () => {
+  it('registers every pipeline job', async () => {
     const work = vi.fn(() => Promise.resolve('w'));
     const names = await registerHandlers(
       { work } as never,
@@ -45,6 +45,7 @@ describe('pipeline job handlers', () => {
       'classify-cluster',
       'discover-source',
       'refresh-metrics',
+      'scan-duplicates',
       'score-video',
     ]);
   });

@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { createThumbnailHasher, scanDuplicates, type ScanSummary } from '@vd/dedupe';
 import {
   parseLadder,
   refreshDue,
@@ -149,7 +150,7 @@ export function registerScheduling(program: Command, io: CommandIO): void {
   program
     .command('tick')
     .description(
-      'One scheduling pass: due queries → due metric refreshes → rescore stale (run from cron)',
+      'One scheduling pass: due queries → due metric refreshes → rescore stale → duplicate analysis of new videos (run from cron)',
     )
     .option(
       '--limit <n>',
@@ -177,7 +178,18 @@ export function registerScheduling(program: Command, io: CommandIO): void {
             );
           }
           const scoring = await rescore(deps, { scope: { kind: 'stale' }, limit: opts.limit });
-          return { discovery, refreshes, scoring };
+          // Last and isolated: duplicate analysis never fails the discovery pass.
+          let duplicates: ScanSummary | { error: string };
+          try {
+            duplicates = await scanDuplicates(deps.db, {
+              scope: { unprocessedOnly: true },
+              limit: opts.limit,
+              hasher: createThumbnailHasher(),
+            });
+          } catch (err) {
+            duplicates = { error: err instanceof Error ? err.message : String(err) };
+          }
+          return { discovery, refreshes, scoring, duplicates };
         });
         const ok =
           result.discovery.runs.every((r) => r.status === 'succeeded') &&
@@ -191,6 +203,12 @@ export function registerScheduling(program: Command, io: CommandIO): void {
             io.out(`- skipped query ${s.queryId}: ${s.reason}`);
           for (const r of result.refreshes) printDue(io, r);
           printRescore(io, result.scoring, false, 5);
+          const d = result.duplicates;
+          io.out(
+            'error' in d
+              ? `! duplicate analysis skipped: ${d.error}`
+              : `✔ duplicates: ${d.targets} new videos · ${d.suggested} possible · ${d.autoConfirmed} auto-confirmed${d.errors.length ? ` · ${d.errors.length} errors` : ''}`,
+          );
         }
         if (!ok) process.exitCode = 1;
       } catch (err) {

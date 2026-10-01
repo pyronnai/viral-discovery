@@ -4,10 +4,15 @@
  * - rights:        unknown | requested | granted | denied | own_content (latest = current)
  * They are independent: "approved" never implies rights clearance, and nothing
  * here publishes or contacts anyone.
+ *
+ * After a cluster merge with conflicting histories, the next decision recorded
+ * here resolves the conflict (so it is always appended, even if it repeats the
+ * latest carried-over record).
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { REVIEW_STATUSES, RIGHTS_STATUSES, type ReviewStatus, type RightsStatus } from '@vd/core';
 import { schema, type AnyDatabase } from '@vd/db';
+import { clusterDecisionState } from '@vd/dedupe';
 
 export class ReviewError extends Error {
   constructor(message: string) {
@@ -19,10 +24,13 @@ export class ReviewError extends Error {
 async function assertCluster(db: AnyDatabase, clusterId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(clusterId)) throw new ReviewError('invalid candidate id');
   const [c] = await db
-    .select({ id: schema.clusters.id })
+    .select({ id: schema.clusters.id, mergedInto: schema.clusters.mergedIntoClusterId })
     .from(schema.clusters)
     .where(eq(schema.clusters.id, clusterId));
   if (!c) throw new ReviewError('candidate not found');
+  // Decisions belong on the surviving cluster, never on a merged-away one.
+  if (c.mergedInto)
+    throw new ReviewError('this candidate was merged into another; reload the page');
 }
 
 function cleanNote(note: string | null | undefined): string | null {
@@ -57,7 +65,8 @@ export async function recordReview(db: AnyDatabase, input: ReviewInput) {
     .where(eq(schema.reviewEvents.clusterId, input.clusterId))
     .orderBy(desc(schema.reviewEvents.createdAt), desc(schema.reviewEvents.id))
     .limit(1);
-  if (latest && latest.status === status && latest.note === note)
+  const { reviewConflict } = await clusterDecisionState(db, input.clusterId);
+  if (!reviewConflict && latest && latest.status === status && latest.note === note)
     return { event: latest, created: false };
   const [event] = await db
     .insert(schema.reviewEvents)
@@ -107,7 +116,9 @@ export async function setRights(db: AnyDatabase, input: RightsInput) {
     .where(and(eq(schema.rights.clusterId, input.clusterId)))
     .orderBy(desc(schema.rights.createdAt), desc(schema.rights.id))
     .limit(1);
+  const { rightsConflict } = await clusterDecisionState(db, input.clusterId);
   if (
+    !rightsConflict &&
     latest &&
     latest.status === status &&
     latest.notes === notes &&

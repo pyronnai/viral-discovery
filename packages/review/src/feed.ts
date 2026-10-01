@@ -40,10 +40,18 @@ export interface FeedRow {
   scoreComponents: Record<string, unknown> | null;
   reasonCodes: string[] | null;
   scoredAt: Date | null;
+  /** NULL while a merge review conflict is unresolved (see reviewConflict). */
   reviewStatus: 'approved' | 'rejected' | 'saved' | 'already_used' | null;
   reviewedAt: Date | null;
   reviewNote: string | null;
+  /** 'conflict' while a merge rights conflict is unresolved. */
   rightsStatus: string;
+  reviewConflict: boolean;
+  rightsConflict: boolean;
+  /** Other clusters suggested as possible duplicates (not yet decided). */
+  possibleDuplicates: number;
+  /** Platforms of the versions in this cluster. */
+  platforms: string[];
   labels: { label: string; confidence: number }[] | null;
   safetyFlags: { flag: string; confidence: number; note: string }[] | null;
   aiSummary: string | null;
@@ -63,6 +71,7 @@ export interface FeedRow {
 
 export const REVIEW_FILTERS = [
   'unreviewed',
+  'conflict',
   'approved',
   'rejected',
   'saved',
@@ -85,6 +94,7 @@ export interface FeedFilters {
   discoveredWithinHours?: number | undefined;
   rights?: string | undefined;
   flagged?: boolean | undefined;
+  possibleDuplicates?: boolean | undefined;
 }
 
 interface Cursor {
@@ -131,7 +141,21 @@ export async function rows<T>(db: AnyDatabase, query: SQL): Promise<T[]> {
   return result.rows;
 }
 
-/** The per-cluster summary relation shared by the feed, summary counts, and detail. */
+/**
+ * A merge conflict is open while no decision was recorded after the latest
+ * conflicting merge. Until then the cluster has no effective review / rights status.
+ */
+const REVIEW_CONFLICT = sql.raw(
+  `(mc.review_at is not null and (rv.created_at is null or rv.created_at <= mc.review_at))`,
+);
+const RIGHTS_CONFLICT = sql.raw(
+  `(mc.rights_at is not null and (rt.created_at is null or rt.created_at <= mc.rights_at))`,
+);
+
+/**
+ * The per-cluster summary relation shared by the feed, summary counts, and detail.
+ * Clusters merged into another are excluded (their videos and history live on the survivor).
+ */
 export function baseQuery(): SQL {
   const scoreVersion = DEFAULT_SCORING_CONFIG.version;
   return sql`
@@ -145,8 +169,16 @@ export function baseQuery(): SQL {
       coalesce(cr.handle, v.creator_handle) as "creatorHandle",
       s.value as score, s.state::text as "scoreState", s.confidence,
       s.components as "scoreComponents", s.reason_codes as "reasonCodes", s.computed_at as "scoredAt",
-      rv.status::text as "reviewStatus", rv.created_at as "reviewedAt", rv.note as "reviewNote",
-      coalesce(rt.status::text, 'unknown') as "rightsStatus",
+      case when ${REVIEW_CONFLICT} then null else rv.status::text end as "reviewStatus",
+      rv.created_at as "reviewedAt", rv.note as "reviewNote",
+      case when ${RIGHTS_CONFLICT} then 'conflict' else coalesce(rt.status::text, 'unknown') end as "rightsStatus",
+      ${REVIEW_CONFLICT} as "reviewConflict", ${RIGHTS_CONFLICT} as "rightsConflict",
+      (select count(distinct case when va.cluster_id = c.id then vb.cluster_id else va.cluster_id end)::int
+        from duplicate_candidates d
+        join videos va on va.id = d.video_a_id join videos vb on vb.id = d.video_b_id
+        where d.status = 'possible' and va.cluster_id <> vb.cluster_id
+          and (va.cluster_id = c.id or vb.cluster_id = c.id)) as "possibleDuplicates",
+      (select array_agg(distinct v4.platform) from videos v4 where v4.cluster_id = c.id) as platforms,
       cl.labels, cl.safety_flags as "safetyFlags", cl.rationale as "aiSummary", cl.created_at as "classifiedAt",
       cf.error_kind as "classificationFailure", cf.attempted_at as "classificationFailedAt",
       ms.views, ms.likes, ms.comments, ms.shares, ms.captured_at as "metricsAt",
@@ -172,8 +204,13 @@ export function baseQuery(): SQL {
       where cluster_id = c.id order by created_at desc, id desc limit 1
     ) rv on true
     left join lateral (
-      select status from rights where cluster_id = c.id order by created_at desc, id desc limit 1
+      select status, created_at from rights where cluster_id = c.id order by created_at desc, id desc limit 1
     ) rt on true
+    left join lateral (
+      select max(merged_at) filter (where review_conflict) as review_at,
+        max(merged_at) filter (where rights_conflict) as rights_at
+      from cluster_merges where survivor_cluster_id = c.id
+    ) mc on true
     left join lateral (
       select labels, safety_flags, rationale, created_at from classifications
       where cluster_id = c.id and taxonomy_version = ${TAXONOMY_VERSION} and prompt_version = ${PROMPT_VERSION}
@@ -199,12 +236,16 @@ export function baseQuery(): SQL {
         where v3.cluster_id = c.id
         group by so.name, so.adapter_id
       ) x
-    ) sg on true`;
+    ) sg on true
+    where c.merged_into_cluster_id is null`;
 }
 
 function filterSql(filters: FeedFilters, now: Date): SQL[] {
   const where: SQL[] = [];
-  if (filters.review === 'unreviewed') where.push(sql`f."reviewStatus" is null`);
+  if (filters.review === 'unreviewed')
+    where.push(sql`f."reviewStatus" is null and not f."reviewConflict"`);
+  else if (filters.review === 'conflict')
+    where.push(sql`(f."reviewConflict" or f."rightsConflict")`);
   else if (filters.review) where.push(sql`f."reviewStatus" = ${filters.review}`);
   if (filters.label)
     where.push(sql`f.labels @> ${JSON.stringify([{ label: filters.label }])}::jsonb`);
@@ -222,6 +263,7 @@ function filterSql(filters: FeedFilters, now: Date): SQL[] {
   if (filters.rights) where.push(sql`f."rightsStatus" = ${filters.rights}`);
   if (filters.flagged)
     where.push(sql`jsonb_array_length(coalesce(f."safetyFlags", '[]'::jsonb)) > 0`);
+  if (filters.possibleDuplicates) where.push(sql`f."possibleDuplicates" > 0`);
   return where;
 }
 
@@ -272,6 +314,8 @@ export interface FeedSummary {
   insufficientEvidence: number;
   flagged: number;
   unclassified: number;
+  conflicts: number;
+  possibleDuplicates: number;
 }
 
 /** "Breaking out" = scored with a latest virality score at or above this. */
@@ -283,14 +327,16 @@ export async function getSummary(db: AnyDatabase): Promise<FeedSummary> {
     sql`select
       count(*)::int as total,
       count(*) filter (where f."scoreState" = 'scored' and f.score >= ${BREAKING_OUT_SCORE})::int as "breakingOut",
-      count(*) filter (where f."reviewStatus" is null)::int as unreviewed,
+      count(*) filter (where f."reviewStatus" is null and not f."reviewConflict")::int as unreviewed,
       count(*) filter (where f."reviewStatus" = 'saved')::int as saved,
       count(*) filter (where f."reviewStatus" = 'approved')::int as approved,
       count(*) filter (where f."reviewStatus" = 'rejected')::int as rejected,
       count(*) filter (where f."reviewStatus" = 'already_used')::int as "alreadyUsed",
       count(*) filter (where f."scoreState" = 'insufficient_evidence')::int as "insufficientEvidence",
       count(*) filter (where jsonb_array_length(coalesce(f."safetyFlags", '[]'::jsonb)) > 0)::int as flagged,
-      count(*) filter (where f.labels is null)::int as unclassified
+      count(*) filter (where f.labels is null)::int as unclassified,
+      count(*) filter (where f."reviewConflict" or f."rightsConflict")::int as conflicts,
+      count(*) filter (where f."possibleDuplicates" > 0)::int as "possibleDuplicates"
     from (${baseQuery()}) f`,
   );
   return (
@@ -305,6 +351,8 @@ export async function getSummary(db: AnyDatabase): Promise<FeedSummary> {
       insufficientEvidence: 0,
       flagged: 0,
       unclassified: 0,
+      conflicts: 0,
+      possibleDuplicates: 0,
     }
   );
 }

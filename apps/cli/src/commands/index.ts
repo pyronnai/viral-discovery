@@ -5,6 +5,7 @@ import { registerClassify } from './classify.ts';
 import { registerConfigCheck } from './config-check.ts';
 import { registerDbCheck } from './db-check.ts';
 import { registerDiscover } from './discover.ts';
+import { registerDuplicates } from './duplicates.ts';
 import { registerHealth } from './health.ts';
 import { registerQueries } from './queries.ts';
 import { registerRefreshMetrics } from './refresh-metrics.ts';
@@ -28,4 +29,5 @@ export const COMMANDS: readonly CommandRegistrar[] = [
   registerQueries,
   registerScheduling,
   registerClassify,
+  registerDuplicates,
 ];

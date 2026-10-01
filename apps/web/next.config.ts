@@ -19,6 +19,7 @@ const config: NextConfig = {
     '@vd/config',
     '@vd/core',
     '@vd/db',
+    '@vd/dedupe',
     '@vd/pipeline',
     '@vd/review',
     '@vd/scoring',

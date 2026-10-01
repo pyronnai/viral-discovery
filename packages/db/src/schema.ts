@@ -31,6 +31,7 @@ import {
 import {
   CONTENT_ORIGINS,
   DISCOVERY_RUN_STATUSES,
+  DUPLICATE_STATUSES,
   DISCOVERY_RUN_TRIGGERS,
   REVIEW_STATUSES,
   RIGHTS_STATUSES,
@@ -51,6 +52,7 @@ export const discoveryRunTriggerEnum = pgEnum('discovery_run_trigger', DISCOVERY
 export const sourceQueryKindEnum = pgEnum('source_query_kind', SOURCE_QUERY_KINDS);
 export const videoAvailabilityEnum = pgEnum('video_availability', VIDEO_AVAILABILITIES);
 export const scoreStateEnum = pgEnum('score_state', SCORE_STATES);
+export const duplicateStatusEnum = pgEnum('duplicate_status', DUPLICATE_STATUSES);
 
 const tz = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const createdAt = () => tz('created_at').notNull().defaultNow();
@@ -154,12 +156,23 @@ export const creators = pgTable(
   (t) => [unique('creators_platform_creator_uq').on(t.platform, t.platformCreatorId)],
 );
 
+/**
+ * A cluster is one believed underlying piece of content. Videos (platform
+ * representations) join a cluster by exact identity at ingest, or by a confirmed
+ * near-duplicate merge. A merged-away cluster is kept (never deleted) and points
+ * at the cluster that absorbed it.
+ */
 export const clusters = pgTable('clusters', {
   id: uuid('id').primaryKey().defaultRandom(),
   // Circular with videos.cluster_id; nullable and SET NULL so either side can be deleted.
   representativeVideoId: uuid('representative_video_id').references((): AnyPgColumn => videos.id, {
     onDelete: 'set null',
   }),
+  /** Set when this cluster was merged into another; it then has no videos of its own. */
+  mergedIntoClusterId: uuid('merged_into_cluster_id').references((): AnyPgColumn => clusters.id, {
+    onDelete: 'set null',
+  }),
+  mergedAt: tz('merged_at'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -180,7 +193,19 @@ export const videos = pgTable(
     publishedAt: tz('published_at'),
     durationMs: integer('duration_ms'),
     thumbnailUrl: text('thumbnail_url'),
+    /** 64-bit DCT perceptual hash of the thumbnail (16 hex chars); NULL if not computed. */
     thumbnailPhash: text('thumbnail_phash'),
+    /** Outcome of the last hashing attempt: hashed | no_thumbnail | host_not_allowed | fetch_failed | … */
+    thumbnailHashStatus: text('thumbnail_hash_status'),
+    /** The thumbnail URL the hash/status refers to (a new URL triggers one new attempt). */
+    thumbnailHashUrl: text('thumbnail_hash_url'),
+    thumbnailHashedAt: tz('thumbnail_hashed_at'),
+    /** 8 one-byte bands of the hash ("0:a3", …) for indexed near-hash candidate search. */
+    thumbnailHashBands: text('thumbnail_hash_bands').array(),
+    /** Distinctive normalized title/caption tokens for indexed candidate search. */
+    matchTokens: text('match_tokens').array(),
+    /** When near-duplicate analysis last ran for this video; NULL = unprocessed. */
+    duplicateScannedAt: tz('duplicate_scanned_at'),
     language: text('language'),
     contentOrigin: contentOriginEnum('content_origin').notNull().default('discovered_external'),
     availability: videoAvailabilityEnum('availability').notNull().default('available'),
@@ -198,6 +223,11 @@ export const videos = pgTable(
   (t) => [
     unique('videos_platform_video_uq').on(t.platform, t.platformVideoId),
     index('videos_cluster_id_idx').on(t.clusterId),
+    // Near-duplicate candidate generation (blocking) — never an all-pairs scan.
+    index('videos_duration_idx').on(t.durationMs),
+    index('videos_hash_bands_idx').using('gin', t.thumbnailHashBands),
+    index('videos_match_tokens_idx').using('gin', t.matchTokens),
+    index('videos_duplicate_scanned_idx').on(t.duplicateScannedAt),
     check('videos_duration_nonneg', sql`${t.durationMs} IS NULL OR ${t.durationMs} >= 0`),
   ],
 );
@@ -391,6 +421,10 @@ export const reviewEvents = pgTable(
     status: reviewStatusEnum('status').notNull(),
     note: text('note'),
     reviewer: text('reviewer').notNull().default('owner'),
+    /** Set when a cluster merge carried this event over from the absorbed cluster. */
+    originClusterId: uuid('origin_cluster_id').references((): AnyPgColumn => clusters.id, {
+      onDelete: 'set null',
+    }),
     createdAt: createdAt(),
   },
   (t) => [index('review_events_cluster_id_idx').on(t.clusterId)],
@@ -415,10 +449,93 @@ export const rights = pgTable(
     decidedAt: tz('decided_at'),
     expiresAt: tz('expires_at'),
     notes: text('notes'),
+    /** Set when a cluster merge carried this record over from the absorbed cluster. */
+    originClusterId: uuid('origin_cluster_id').references((): AnyPgColumn => clusters.id, {
+      onDelete: 'set null',
+    }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [index('rights_cluster_id_idx').on(t.clusterId)],
+);
+
+// ── near-duplicates ────────────────────────────────────────────────────────
+/**
+ * A detected (or human-decided) near-duplicate relationship between two videos
+ * with different exact identities. One row per unordered pair (video_a_id <
+ * video_b_id). Evidence is the explainable per-signal breakdown, never a bare flag.
+ */
+export const duplicateCandidates = pgTable(
+  'duplicate_candidates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    videoAId: uuid('video_a_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    videoBId: uuid('video_b_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    status: duplicateStatusEnum('status').notNull().default('possible'),
+    /** 0–1 detector confidence at the last evaluation. */
+    confidence: real('confidence').notNull(),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull().default({}),
+    /** Machine-readable explanation, e.g. ["THUMBNAIL_VERY_CLOSE", "AUTO_BLOCKED_NO_DURATION"]. */
+    reasons: jsonb('reasons').$type<string[]>().notNull().default([]),
+    detectorVersion: text('detector_version').notNull(),
+    firstDetectedAt: tz('first_detected_at').notNull().defaultNow(),
+    lastEvaluatedAt: tz('last_evaluated_at').notNull().defaultNow(),
+    decidedAt: tz('decided_at'),
+    /** 'owner' for human decisions, 'detector' for auto-confirmation. */
+    decidedBy: text('decided_by'),
+    note: text('note'),
+  },
+  (t) => [
+    unique('duplicate_candidates_pair_uq').on(t.videoAId, t.videoBId),
+    index('duplicate_candidates_video_b_idx').on(t.videoBId),
+    index('duplicate_candidates_status_idx').on(t.status),
+    check('duplicate_candidates_ordered_pair', sql`${t.videoAId} < ${t.videoBId}`),
+    check(
+      'duplicate_candidates_confidence_range',
+      sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`,
+    ),
+  ],
+);
+
+/**
+ * Audit trail of cluster consolidation. Nothing is deleted by a merge: videos and
+ * cluster-level histories move to the survivor; this row records what each side's
+ * review/rights state was and whether a human must resolve a conflict.
+ */
+export const clusterMerges = pgTable(
+  'cluster_merges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    survivorClusterId: uuid('survivor_cluster_id')
+      .notNull()
+      .references(() => clusters.id, { onDelete: 'cascade' }),
+    absorbedClusterId: uuid('absorbed_cluster_id')
+      .notNull()
+      .references(() => clusters.id, { onDelete: 'cascade' }),
+    duplicateCandidateId: uuid('duplicate_candidate_id').references(() => duplicateCandidates.id, {
+      onDelete: 'set null',
+    }),
+    /** 'human' (confirmed) or 'auto' (auto_confirmed). */
+    trigger: text('trigger').notNull(),
+    representativeVideoId: uuid('representative_video_id').references(() => videos.id, {
+      onDelete: 'set null',
+    }),
+    /** Both sides had different current review decisions — a human must choose. */
+    reviewConflict: boolean('review_conflict').notNull().default(false),
+    /** Rights records cannot safely be combined — a human must record the merged rights. */
+    rightsConflict: boolean('rights_conflict').notNull().default(false),
+    /** Each side's review/rights state at merge time and the moved record counts. */
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    mergedAt: tz('merged_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('cluster_merges_survivor_idx').on(t.survivorClusterId, t.mergedAt),
+    index('cluster_merges_absorbed_idx').on(t.absorbedClusterId),
+  ],
 );
 
 // ── api usage / cost accounting ────────────────────────────────────────────
@@ -453,5 +570,7 @@ export const ALL_TABLES = {
   classificationFailures,
   reviewEvents,
   rights,
+  duplicateCandidates,
+  clusterMerges,
   apiUsage,
 } as const;

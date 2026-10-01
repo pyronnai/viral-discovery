@@ -15,6 +15,7 @@
     "@vd/config": "workspace:^",
     "@vd/core": "workspace:^",
     "@vd/db": "workspace:^",
+    "@vd/dedupe": "workspace:^",
     "@vd/pipeline": "workspace:^",
     "@vd/scoring": "workspace:^",
     "@vd/url-identity": "workspace:^",

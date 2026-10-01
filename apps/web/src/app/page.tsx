@@ -61,12 +61,22 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
           '❔',
         )}
         {bucket('Flagged', summary.flagged, { flagged: true }, '⚠')}
+        {bucket(
+          'Possible duplicates',
+          summary.possibleDuplicates,
+          { possibleDuplicates: true },
+          '⧉',
+        )}
+        {summary.conflicts
+          ? bucket('Merge conflicts', summary.conflicts, { review: 'conflict' }, '⚖')
+          : null}
       </nav>
 
       <form className="filters" method="get" action="/">
         <select name="review" defaultValue={filters.review ?? ''} aria-label="Review status">
           <option value="">Any review</option>
           <option value="unreviewed">Unreviewed only</option>
+          <option value="conflict">Merge conflict</option>
           {Object.entries(REVIEW_LABELS).map(([v, l]) => (
             <option key={v} value={v}>
               {l}
@@ -111,7 +121,7 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
         </select>
         <select name="rights" defaultValue={filters.rights ?? ''} aria-label="Rights status">
           <option value="">Any rights</option>
-          {RIGHTS_STATUSES.map((r) => (
+          {[...RIGHTS_STATUSES, 'conflict' as const].map((r) => (
             <option key={r} value={r}>
               {RIGHTS_LABELS[r]}
             </option>
@@ -145,6 +155,15 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
             defaultChecked={filters.flagged ?? false}
           />{' '}
           flagged
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            name="dups"
+            value="1"
+            defaultChecked={filters.possibleDuplicates ?? false}
+          />{' '}
+          possible duplicates
         </label>
         <button className="btn" type="submit">
           Apply

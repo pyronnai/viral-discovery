@@ -31,6 +31,7 @@ describe('cli program', () => {
       'db-check',
       'discover',
       'discover-due',
+      'duplicates',
       'health',
       'queries',
       'refresh-metrics',
@@ -38,6 +39,27 @@ describe('cli program', () => {
       'submit-url',
       'tick',
     ]);
+  });
+});
+
+describe('duplicates', () => {
+  it('has scan, list and explain subcommands', () => {
+    const dup = buildProgram({ out: () => {}, err: () => {} }).commands.find(
+      (c) => c.name() === 'duplicates',
+    )!;
+    expect(dup.commands.map((c) => c.name())).toEqual(['scan', 'list', 'explain']);
+  });
+
+  it('validates ids and statuses before touching the database', async () => {
+    const h = harness();
+    await h.run('duplicates', 'explain', 'nope', 'also-nope');
+    expect(h.err.join('\n')).toMatch(/not a video id: nope/);
+    const h2 = harness();
+    await h2.run('duplicates', 'list', '--status', 'maybe', '--json');
+    expect(JSON.parse(h2.out.join('\n'))).toMatchObject({
+      ok: false,
+    });
+    expect(h2.out.join('\n')).toMatch(/--status must be one of/);
   });
 });
 

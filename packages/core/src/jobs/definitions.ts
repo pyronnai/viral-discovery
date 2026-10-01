@@ -11,6 +11,7 @@ export const JOB_NAMES = [
   'refresh-metrics',
   'score-video',
   'classify-cluster',
+  'scan-duplicates',
 ] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 
@@ -26,6 +27,8 @@ export const JobPayloadSchemas = {
   'refresh-metrics': z.object({ videoIds: z.array(uuid).min(1).max(500) }),
   'score-video': z.object({ videoId: uuid, algorithmVersion: z.string().min(1).optional() }),
   'classify-cluster': z.object({ clusterId: uuid }),
+  /** Near-duplicate analysis for newly ingested (or changed) videos. */
+  'scan-duplicates': z.object({ videoIds: z.array(uuid).min(1).max(500) }),
 } satisfies Record<JobName, z.ZodType>;
 
 export type JobPayload<N extends JobName> = z.infer<(typeof JobPayloadSchemas)[N]>;

@@ -51,7 +51,7 @@ pnpm cli queries add youtube --kind search --param q="funny animals" \
 pnpm cli queries add youtube --kind channel_feed --param channelId=UC... --cadence 180
 pnpm cli queries add bluesky --kind search --param q=funny --param domain=tiktok.com --cadence 60
 pnpm cli queries list
-pnpm cli tick                          # due queries → due refreshes → rescore stale (cron this)
+pnpm cli tick                          # due queries → due refreshes → rescore stale → duplicate scan of new videos (cron this)
 pnpm cli refresh-metrics youtube --due --ladder 2h,8h,24h,72h
 pnpm cli rescore --explain             # stale only by default; --unscored / --recent 24 / --video <id>
 ```
@@ -62,7 +62,13 @@ pnpm cli rescore --explain             # stale only by default; --unscored / --r
 pnpm --filter @vd/web dev        # http://localhost:3000 (reads the root .env)
 pnpm --filter @vd/web build      # production build
 pnpm cli classify --eligible     # needs ANTHROPIC_API_KEY; the dashboard works without it
+pnpm cli duplicates scan         # near-duplicates of unprocessed videos (bounded; --recent/--platform/--video/--limit)
+pnpm cli duplicates list         # possible duplicates with evidence (--status confirmed|auto_confirmed|rejected)
+pnpm cli duplicates explain <videoA> <videoB>   # evidence for one pair, stores nothing
 ```
+
+Possible duplicates are confirmed or rejected on the candidate detail page; see "Identity:
+exact vs near-duplicate" in the architecture doc.
 
 Scores are `scored`, `provisional`, or `insufficient_evidence` (no value); see
 "Virality / breakout scoring v1" in [`docs/architecture.md`](docs/architecture.md).
@@ -97,6 +103,7 @@ packages/url-identity        URL → canonical (platform, video id, URL)
 apps/web                     Next.js review dashboard (internal, single-user)
 packages/review              feed/detail queries, review + rights actions, view models
 packages/classification      content classifier (provider abstraction, taxonomy, Zod-validated output)
+packages/dedupe              near-duplicate detection (pHash, evidence, safe thumbnail fetch, merges, planner query)
 packages/url-resolution      allowlisted TikTok short-link expansion (network)
 packages/scoring             pure, deterministic breakout score v1
 packages/pipeline            ingestion, submission, refresh ladder, scheduling, score lifecycle

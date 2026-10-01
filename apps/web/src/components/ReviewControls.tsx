@@ -25,10 +25,13 @@ export function ReviewControls({
   clusterId,
   status,
   withNote,
+  conflict,
 }: {
   clusterId: string;
   status: string | null;
   withNote?: boolean;
+  /** Merged versions had different decisions; any choice resolves it. */
+  conflict?: boolean;
 }) {
   const [optimistic, setOptimistic] = useOptimistic(status);
   const [pending, startTransition] = useTransition();
@@ -47,8 +50,11 @@ export function ReviewControls({
 
   return (
     <div className="review-controls">
-      <div className={`review-status review-${optimistic ?? 'none'}`} aria-live="polite">
-        {optimistic ? LABELS[optimistic] : 'Unreviewed'}
+      <div
+        className={`review-status review-${optimistic ?? (conflict ? 'conflict' : 'none')}`}
+        aria-live="polite"
+      >
+        {optimistic ? LABELS[optimistic] : conflict ? '⚖ Review conflict' : 'Unreviewed'}
         {pending ? ' …' : ''}
       </div>
       <div className="review-buttons">

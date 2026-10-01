@@ -3,16 +3,19 @@
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { DuplicateError, confirmDuplicate, rejectDuplicate } from '@vd/dedupe';
 import { classifyCluster } from '@vd/pipeline';
 import { ReviewError, recordReview, setRights } from '@vd/review';
 import { ACCESS_COOKIE, safeNext, sha256Hex, tokenMatches } from '../lib/access.ts';
 import { getContext } from '../lib/server.ts';
 
 export type ActionResult =
-  { ok: true; status?: string; message?: string } | { ok: false; error: string };
+  | { ok: true; status?: string; message?: string; redirectTo?: string }
+  | { ok: false; error: string };
 
 function failure(err: unknown, fallback: string): ActionResult {
-  if (err instanceof ReviewError) return { ok: false, error: err.message };
+  if (err instanceof ReviewError || err instanceof DuplicateError)
+    return { ok: false, error: err.message };
   getContext().logger.error({ err }, fallback);
   return { ok: false, error: fallback };
 }
@@ -74,6 +77,45 @@ export async function classifyAction(clusterId: string, force: boolean): Promise
     };
   } catch (err) {
     return failure(err, 'classification failed');
+  }
+}
+
+/** CONFIRM SAME VIDEO: merges the two clusters (nothing is deleted; conflicts are surfaced). */
+export async function confirmDuplicateAction(
+  candidateId: string,
+  clusterId: string,
+): Promise<ActionResult> {
+  try {
+    const r = await confirmDuplicate(getContext().db, candidateId);
+    const target = r.merge?.survivorClusterId ?? clusterId;
+    revalidatePath('/');
+    revalidatePath(`/candidates/${clusterId}`);
+    revalidatePath(`/candidates/${target}`);
+    return {
+      ok: true,
+      message:
+        r.merge?.reviewConflict || r.merge?.rightsConflict
+          ? 'merged — conflict needs review'
+          : 'merged',
+      redirectTo: `/candidates/${target}`,
+    };
+  } catch (err) {
+    return failure(err, 'could not confirm the duplicate');
+  }
+}
+
+/** NOT THE SAME: remembered; never suggested again for these two clusters. */
+export async function rejectDuplicateAction(
+  candidateId: string,
+  clusterId: string,
+): Promise<ActionResult> {
+  try {
+    await rejectDuplicate(getContext().db, candidateId);
+    revalidatePath('/');
+    revalidatePath(`/candidates/${clusterId}`);
+    return { ok: true, message: 'marked not the same' };
+  } catch (err) {
+    return failure(err, 'could not reject the duplicate');
   }
 }
 

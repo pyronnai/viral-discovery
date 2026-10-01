@@ -117,6 +117,13 @@ export async function upsertVideo(
         rawPayloadFetchedAt: keep(videos.rawPayloadFetchedAt),
         firstDiscoveredAt: sql`least(${videos.firstDiscoveredAt}, excluded."first_discovered_at")`,
         lastRefreshedAt: keep(videos.lastRefreshedAt),
+        // Matching inputs changed → the video becomes eligible for near-duplicate analysis again.
+        duplicateScannedAt: sql`CASE WHEN ${keep(videos.title)} IS DISTINCT FROM ${videos.title}
+          OR ${keep(videos.caption)} IS DISTINCT FROM ${videos.caption}
+          OR ${keep(videos.durationMs)} IS DISTINCT FROM ${videos.durationMs}
+          OR ${keep(videos.publishedAt)} IS DISTINCT FROM ${videos.publishedAt}
+          OR ${keep(videos.thumbnailUrl)} IS DISTINCT FROM ${videos.thumbnailUrl}
+          THEN NULL ELSE ${videos.duplicateScannedAt} END`,
         updatedAt: sql`now()`,
       },
     })
@@ -132,7 +139,8 @@ export async function upsertVideo(
 
 /**
  * Every video belongs to a cluster (review and classification are per cluster).
- * Until near-duplicate detection exists, a new video gets a singleton cluster.
+ * A new video gets a singleton cluster (exact identity); near-duplicate analysis
+ * (@vd/dedupe) may later merge it into another cluster once confirmed.
  */
 export async function ensureCluster(
   db: Executor,

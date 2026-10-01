@@ -34,8 +34,9 @@ export function parseFilters(params: SearchParams): FeedFilters {
     state: oneOf(one(params, 'state'), STATE_FILTERS),
     minScore: positive(one(params, 'minScore'), 100),
     discoveredWithinHours: positive(one(params, 'within'), 24 * 365),
-    rights: oneOf(one(params, 'rights'), RIGHTS_STATUSES),
+    rights: oneOf(one(params, 'rights'), [...RIGHTS_STATUSES, 'conflict'] as const),
     flagged: one(params, 'flagged') === '1' ? true : undefined,
+    possibleDuplicates: one(params, 'dups') === '1' ? true : undefined,
   };
 }
 
@@ -52,6 +53,7 @@ export function feedHref(filters: FeedFilters, cursor?: string | null): string {
     q.set('within', String(filters.discoveredWithinHours));
   if (filters.rights) q.set('rights', filters.rights);
   if (filters.flagged) q.set('flagged', '1');
+  if (filters.possibleDuplicates) q.set('dups', '1');
   if (cursor) q.set('cursor', cursor);
   const s = q.toString();
   return s ? `/?${s}` : '/';

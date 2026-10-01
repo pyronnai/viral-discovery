@@ -3,6 +3,8 @@
  * meaning (e.g. whether a source is public propagation) on its own.
  */
 import { SIGNIFICANT_FLAGS, type SafetyFlag } from '@vd/classification';
+import { summarizeEvidence, type DuplicateEvidence } from '@vd/dedupe';
+import type { CandidateDetail, DetailDuplicate, DetailMerge } from './detail.ts';
 import type { FeedRow, SourceCount } from './feed.ts';
 
 export type SightingRoles = Record<string, 'propagation' | 'provenance'>;
@@ -37,6 +39,7 @@ export const RIGHTS_LABELS: Record<string, string> = {
   granted: 'Granted',
   denied: 'Denied',
   own_content: 'Own content',
+  conflict: 'Needs review (merge conflict)',
 };
 
 export const COMPONENT_LABELS: Record<string, string> = {
@@ -157,6 +160,12 @@ export interface CardView {
   publicPropagation: SourceCount[];
   provenance: SourceCount[];
   versions: number;
+  /** Platform names of the confirmed versions (representations) in this cluster. */
+  versionPlatforms: string[];
+  /** e.g. "2 possible duplicates"; null when there are none. */
+  duplicatesLabel: string | null;
+  possibleDuplicates: number;
+  conflicts: { review: boolean; rights: boolean };
   metrics: {
     views: string;
     likes: string;
@@ -214,6 +223,12 @@ export function toCardView(row: FeedRow, roles: SightingRoles, now: Date): CardV
     publicPropagation,
     provenance,
     versions: row.versions,
+    versionPlatforms: [...row.platforms].sort().map(platformName),
+    possibleDuplicates: row.possibleDuplicates,
+    duplicatesLabel: row.possibleDuplicates
+      ? `${row.possibleDuplicates} possible duplicate${row.possibleDuplicates === 1 ? '' : 's'}`
+      : null,
+    conflicts: { review: row.reviewConflict, rights: row.rightsConflict },
     metrics: hasMetrics
       ? {
           views: formatCount(row.views),
@@ -225,9 +240,11 @@ export function toCardView(row: FeedRow, roles: SightingRoles, now: Date): CardV
       : null,
     review: {
       status: row.reviewStatus,
-      label: row.reviewStatus
-        ? (REVIEW_LABELS[row.reviewStatus] ?? row.reviewStatus)
-        : 'Unreviewed',
+      label: row.reviewConflict
+        ? 'Review conflict'
+        : row.reviewStatus
+          ? (REVIEW_LABELS[row.reviewStatus] ?? row.reviewStatus)
+          : 'Unreviewed',
       note: row.reviewNote,
     },
     rights: {
@@ -254,4 +271,182 @@ export function growthSeries(
     if (points.length >= 2) return { metric, points };
   }
   return null;
+}
+
+// ── near-duplicates ────────────────────────────────────────────────────────
+const BLOCKER_TEXT: Record<string, string> = {
+  NO_DURATION: 'duration unknown on one side',
+  NO_THUMBNAIL_HASH: 'thumbnails could not be compared',
+  THUMBNAIL_NOT_CLOSE_ENOUGH: 'thumbnails only similar',
+  DURATION_NOT_EXACT: 'durations differ slightly',
+  NO_SUPPORTING_METADATA: 'no supporting title or creator match',
+  TITLE_NUMBERS_CONFLICT: 'titles contain different numbers',
+  SAME_PLATFORM: 'same platform (could be a re-upload or a series)',
+  SCORE_BELOW_AUTO_THRESHOLD: 'evidence below the auto-confirm level',
+  BOTH_SIDES_REVIEWED: 'both already have review/rights history',
+};
+
+export interface DuplicateView {
+  candidateId: string;
+  otherClusterId: string;
+  href: string;
+  platform: string;
+  title: string;
+  creator: string | null;
+  thumbnailUrl: string | null;
+  duration: string;
+  canonicalUrl: string;
+  confidence: number;
+  confidenceText: string;
+  strength: string;
+  evidence: string[];
+  /** Why this was not merged automatically. */
+  needsHumanBecause: string[];
+  note: string | null;
+  decidedAt: Date | null;
+}
+
+function evidenceLines(evidence: Record<string, unknown>): string[] {
+  try {
+    return summarizeEvidence(evidence as unknown as DuplicateEvidence);
+  } catch {
+    return ['Evidence unavailable'];
+  }
+}
+
+export function toDuplicateView(d: DetailDuplicate): DuplicateView {
+  return {
+    candidateId: d.candidateId,
+    otherClusterId: d.otherClusterId,
+    href: `/candidates/${d.otherClusterId}`,
+    platform: platformName(d.platform),
+    title: d.title ?? d.caption?.slice(0, 140) ?? '(untitled)',
+    creator: d.creator,
+    thumbnailUrl: d.thumbnailUrl && /^https:\/\//.test(d.thumbnailUrl) ? d.thumbnailUrl : null,
+    duration: formatDuration(d.durationMs),
+    canonicalUrl: d.canonicalUrl,
+    confidence: d.confidence,
+    confidenceText: `${Math.round(d.confidence * 100)}%`,
+    strength: confidenceLabel(d.confidence),
+    evidence: evidenceLines(d.evidence),
+    needsHumanBecause: d.reasons
+      .filter((r) => r.startsWith('AUTO_BLOCKED_'))
+      .map((r) => BLOCKER_TEXT[r.slice('AUTO_BLOCKED_'.length)] ?? r),
+    note: d.note,
+    decidedAt: d.decidedAt,
+  };
+}
+
+export interface VersionView {
+  videoId: string;
+  platform: string;
+  title: string;
+  creator: string | null;
+  duration: string;
+  canonicalUrl: string;
+  thumbnailUrl: string | null;
+  isRepresentative: boolean;
+  /** How this representation joined the cluster. */
+  joined: string;
+}
+
+export function versionViews(
+  detail: Pick<CandidateDetail, 'versions' | 'confirmations'>,
+): VersionView[] {
+  return detail.versions.map((v) => {
+    // Each confirmation links two versions; describe it from this version's side.
+    const partnerName = (id: string) => {
+      const partner = detail.versions.find((x) => x.videoId === id);
+      return partner ? platformName(partner.platform) : 'another version';
+    };
+    const links = detail.confirmations.flatMap((c) => {
+      const other =
+        c.videoAId === v.videoId ? c.videoBId : c.videoBId === v.videoId ? c.videoAId : null;
+      if (!other) return [];
+      return [
+        c.status === 'auto_confirmed'
+          ? `auto-confirmed same as ${partnerName(other)} (confidence ${c.confidence.toFixed(2)})`
+          : `confirmed same as ${partnerName(other)} by ${c.decidedBy ?? 'owner'}`,
+      ];
+    });
+    const joined = links.length ? links.join('; ') : 'exact identity';
+    return {
+      videoId: v.videoId,
+      platform: platformName(v.platform),
+      title: v.title ?? '(untitled)',
+      creator: v.creator,
+      duration: formatDuration(v.durationMs),
+      canonicalUrl: v.canonicalUrl,
+      thumbnailUrl: v.thumbnailUrl && /^https:\/\//.test(v.thumbnailUrl) ? v.thumbnailUrl : null,
+      isRepresentative: v.isRepresentative,
+      joined,
+    };
+  });
+}
+
+export interface ConflictView {
+  kind: 'review' | 'rights';
+  title: string;
+  reason: string | null;
+  sides: { versions: string; value: string }[];
+}
+
+interface MergeSide {
+  platforms?: string[];
+  review?: string | null;
+  reviewConflict?: boolean;
+  rights?: string | null;
+  rightsHolder?: string | null;
+  rightsConflict?: boolean;
+}
+
+/** Open merge conflicts, with what each merged side had decided. */
+export function conflictViews(
+  summary: Pick<FeedRow, 'reviewConflict' | 'rightsConflict'>,
+  merges: DetailMerge[],
+): ConflictView[] {
+  const out: ConflictView[] = [];
+  const describe = (m: DetailMerge, kind: 'review' | 'rights') => {
+    const sides = (m.details['sides'] as MergeSide[] | undefined) ?? [];
+    return sides.map((side) => ({
+      versions: (side.platforms ?? []).map(platformName).join(', ') || 'unknown',
+      value:
+        kind === 'review'
+          ? side.reviewConflict
+            ? 'already in conflict'
+            : side.review
+              ? (REVIEW_LABELS[side.review] ?? side.review)
+              : 'no decision'
+          : side.rightsConflict
+            ? 'already in conflict'
+            : side.rights
+              ? `${RIGHTS_LABELS[side.rights] ?? side.rights}${side.rightsHolder ? ` (holder: ${side.rightsHolder})` : ''}`
+              : 'no record',
+    }));
+  };
+  const latest = (flag: 'reviewConflict' | 'rightsConflict') =>
+    [...merges]
+      .sort((a, b) => new Date(b.mergedAt).getTime() - new Date(a.mergedAt).getTime())
+      .find((m) => m[flag]);
+  const review = summary.reviewConflict ? latest('reviewConflict') : undefined;
+  if (review) {
+    out.push({
+      kind: 'review',
+      title:
+        'Review conflict — merged versions had different decisions. Choose a decision to resolve it.',
+      reason: (review.details['reviewReason'] as string | null | undefined) ?? null,
+      sides: describe(review, 'review'),
+    });
+  }
+  const rights = summary.rightsConflict ? latest('rightsConflict') : undefined;
+  if (rights) {
+    out.push({
+      kind: 'rights',
+      title:
+        'Rights need review — records from merged versions cannot be combined automatically. Record the rights that apply to this content.',
+      reason: (rights.details['rightsReason'] as string | null | undefined) ?? null,
+      sides: describe(rights, 'rights'),
+    });
+  }
+  return out;
 }

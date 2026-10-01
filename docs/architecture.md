@@ -344,8 +344,8 @@ Two separate questions, never mixed:
 `classify --eligible` / `classify-cluster` job → build input from stored data → provider →
 Zod validation → store (or quarantine) → dashboard.
 
-- **Unit:** the cluster (via its representative video). Clusters are currently singletons
-  (exact identity; see "Cluster-level review").
+- **Unit:** the cluster (via its representative video). A cluster may hold several confirmed
+  representations (see "Identity: exact vs near-duplicate").
 - **Inputs (permitted only):** platform, canonical URL, title, caption, duration, publish
   time, creator display name/handle, short discovery-context descriptors (e.g.
   `bluesky: search "funny"`), and the thumbnail **URL**, which the provider fetches itself.
@@ -442,10 +442,114 @@ needs only `DATABASE_URL` — no source-API or model credentials to render store
 - **Rights are separate:** unknown / requested / granted / denied / own_content, appended to the
   `rights` history per cluster (holder, evidence URL, notes). "Approved + rights unknown" is a
   valid, visible state. No outreach or rights-request automation.
-- **Clusters:** every video belongs to one (singleton clusters, exact identity only; backfilled
-  in migration 0004). A cluster shows one card (its representative), a version count, and all
-  sightings; one decision covers all versions. Near-duplicate clustering is not implemented —
-  the detail page says so.
+- **Clusters:** every video belongs to one (backfilled in migration 0004). A cluster shows one
+  card (its representative), its confirmed versions, and all sightings; one decision covers all
+  versions. Near-duplicates join a cluster only when confirmed (see "Identity: exact vs
+  near-duplicate").
+
+## Identity: exact vs near-duplicate (Phase 4.5)
+
+| Concept      | Meaning                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------- |
+| **Video**    | One platform representation: `(platform, platform_video_id)`.                           |
+| **Cluster**  | One believed underlying piece of content; holds one or more videos.                     |
+| **Sighting** | Where/how a representation was observed (a source, a post, a chart). Never a new video. |
+
+- **Exact identity is authoritative and unchanged.** `(platform, platform_video_id)` is unique;
+  the same upload seen by any source is one video. Near-duplicate detection only ever relates
+  videos with _different_ exact identities.
+- **Near-duplicate identity** is a separate, evidence-based layer in `@vd/dedupe`
+  (`near-dup-v1`), deterministic and explainable, no model involved.
+
+### Signals and thresholds
+
+| Signal           | Measure                                                                                                               | Grades → points                                                                                                                                    |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Thumbnail        | 64-bit DCT pHash, Hamming distance (uniform letter/pillar-box bars trimmed first; near-uniform frames are not hashed) | ≤3 identical +45 · ≤7 very close +35 · ≤14 similar +15 · 15–21 inconclusive 0 · ≥22 different −30                                                  |
+| Duration         | Δ within max(abs, rel of the longer)                                                                                  | ≤max(1 s, 3 %) match +25 · ≤max(3 s, 10 %) close +12 · >max(5 s, 25 %) **different −50 (veto)**                                                    |
+| Title/caption    | distinctive tokens (stopwords, URLs, @mentions, emoji and generic tags like #funny/#fyp/#shorts removed)              | Jaccard ≥0.6 (or containment ≥0.8 with ≥3 shared) strong +20 · ≥0.35 moderate +10 · ≥2 shared weak +4; conflicting numbers ("part 1"/"part 2") −20 |
+| Creator          | normalized handle/display name                                                                                        | same +10; different is **neutral** (reposts are by others)                                                                                         |
+| Publication      | both publish times known                                                                                              | ≤72 h +5 · ≤30 d +2                                                                                                                                |
+| Shared reference | the same individual post (sighting `postUrl`) pointed at both                                                         | +5                                                                                                                                                 |
+
+Never used: view counts, virality scores, content category — they say nothing about identity.
+
+**Decisions:** `possible` needs no veto, ≥2 independent positive signals (thumbnail, duration,
+title, creator) and ≥40 points. A thumbnail judged _different_ without a duration match is a
+veto (this is what separates "same trend, different video" from a repost). **`auto_confirmed`**
+additionally needs: very close/identical thumbnail **and** exact duration match **and** title
+(moderate+) or creator support, no conflicting numbers, **different platforms**, ≥75 points,
+no human "not the same" between the clusters, and not both clusters already carrying human
+review/rights history. Everything else waits for a human. Confidence = points/100 (capped 0.99).
+
+**False-positive policy.** A false merge silently hides a different clip and mixes review/rights
+histories; a missed merge costs one extra card a human can still link. So one strong signal is
+never enough, a duration mismatch vetoes, TikTok pairs (no duration from oEmbed) can never
+auto-merge, same-platform pairs (re-uploads, series episodes) always get a human look, and a
+missing signal never counts as evidence of difference.
+
+### Candidate generation (bounded, no all-pairs)
+
+`duplicates scan` / `tick` / the `scan-duplicates` job select a bounded set of target videos
+(unprocessed by default; `--recent`, `--platform`, `--video`, `--cluster`, `--limit`). Phase 1
+fingerprints every target (thumbnail hash once per URL, distinctive tokens); phase 2 runs three
+indexed, `LIMIT`ed blocking queries per target (default 40 each), and assesses only those pairs:
+
+1. duration window ±max(3 s, 10 %) within ±120 days of publish/discovery (btree `duration_ms`);
+2. thumbnail-hash band overlap (8 one-byte bands in a GIN-indexed `text[]`; pigeonhole
+   guarantees any pair within distance 7 shares a band), across all time — reuploads can be late;
+3. distinctive-token overlap within the time window (GIN-indexed `match_tokens`).
+
+Cost is O(targets × 3 × K), independent of table size. Ingest resets `duplicate_scanned_at` when
+title, caption, duration, publish time or thumbnail URL change.
+
+### Thumbnail fetching (the only network path)
+
+HTTPS only, default port, no userinfo, no IP-literal hosts; host must be a known adapter CDN
+(`ytimg.com`, `ggpht.com`, `jtvnw.net`, `twitch.tv`, `tiktokcdn*.com`, `ibyteimg.com`, `bsky.app`);
+DNS answers are checked **at connect time** (custom `lookup`) and refused unless every address is
+globally routable (no loopback/private/link-local/CGNAT/metadata/ULA/mapped-private), which also
+closes DNS rebinding; redirects followed manually (max 3), each hop re-validated; no cookies or
+credential headers, fresh connection per request; 2 MB cap (declared and streamed); `image/jpeg`
+or `image/png` content type plus magic-byte sniffing; 6 s overall timeout; decode capped at 12 MP.
+Failures become a stored status (`host_not_allowed`, `too_large`, `decode_failed`, …) and
+detection continues without the thumbnail; terminal failures are remembered per URL, transient
+ones (`timeout`, `http_error`, `fetch_failed`) are retried by a later scan. Source video media is
+never requested.
+
+### Human review and merging
+
+The detail page lists **Possible duplicates** (platform, thumbnail, title, duration, confidence,
+evidence lines, why it was not auto-merged, Open original) with **Confirm same video** / **Not
+the same**. The feed card only shows "N possible duplicates" and the confirmed version
+platforms. Possible duplicates share nothing (review, rights, classification) until confirmed.
+
+- **Not the same** is cluster-level: other open suggestions between the same two clusters are
+  rejected too, rescans never resurface them, and a confirm across a rejected pair is refused.
+- **Confirm / auto-confirm merge** (one transaction): the older cluster survives; videos (with
+  their sightings, snapshots, scores) move; review events, rights records, classifications and
+  classification failures move and keep `origin_cluster_id`; the absorbed cluster row stays with
+  `merged_into_cluster_id` (old links redirect; redirects are flattened to one hop); a
+  `cluster_merges` row records each side's review/rights state, what moved, the representative
+  before/after, and any conflict. Nothing is deleted. Un-merging is not supported.
+- **Representative policy** (first difference wins): available › has canonical metrics › usable
+  https thumbnail › richer metadata (title, duration, publish time, creator) › earliest publish
+  time (likelier original) › earliest discovery › id. Popularity is never consulted. Feed metrics
+  and score are the representative's.
+- **Review conflict:** both sides had a current decision and they differ (or either side was
+  already in conflict) → the cluster has _no_ effective decision ("Review conflict") until a new
+  decision is recorded after the merge. Same decision or one-sided → it stands.
+- **Rights conflict (stricter):** different statuses on both sides; both granted/own content
+  without the same recorded rights holder; or a one-sided grant/own content (it covered one
+  representation only) → "Needs review (merge conflict)", never shown or filtered as granted,
+  until a new rights record is saved. One-sided unknown/requested/denied carry over.
+
+### For a future planner
+
+`excludeDuplicatesOfSelected({ selectedClusterIds | selectedVideoIds, candidateClusterIds?,
+minPossibleConfidence = 0.6 })` returns `{ kept, excluded[] }`: excludes selected clusters,
+clusters merged into them (confirmed), and open possible duplicates of them at or above the
+threshold; human-rejected pairs never exclude. No planner exists.
 
 ## Content origin vs rights
 
@@ -464,8 +568,8 @@ Discovery never implies permission. Any future reuse feature must check `rights`
 ## Jobs and scheduling
 
 pg-boss (in its own schema in the same Postgres). The worker idempotently creates the
-five queues on boot and registers handlers for four of them (three since Phase 3,
-`classify-cluster` since Phase 4):
+six queues on boot and registers handlers for five of them (three since Phase 3,
+`classify-cluster` since Phase 4, `scan-duplicates` since Phase 4.5):
 
 | Job                | Handler                                        | Idempotency                                                               |
 | ------------------ | ---------------------------------------------- | ------------------------------------------------------------------------- |
@@ -473,6 +577,7 @@ five queues on boot and registers handlers for four of them (three since Phase 3
 | `refresh-metrics`  | `refreshMetrics` grouped by canonical platform | snapshots unique per (video, captured_at)                                 |
 | `score-video`      | `scoreVideo` (current algorithm only)          | a row is stored only if the evidence fingerprint changed                  |
 | `classify-cluster` | `classifyCluster` (current taxonomy + prompt)  | a row only for new (versions, input fingerprint); no-op when unconfigured |
+| `scan-duplicates`  | `scanDuplicates` for the given video ids       | hashes once per URL; suggestions upserted; human decisions never touched  |
 
 `classify-cluster` (Phase 4) classifies one cluster: idempotent (versions + input fingerprint),
 throws only for retryable provider failures so pg-boss retries, and completes as a no-op with a
@@ -577,5 +682,19 @@ LLM classification, dashboard, compilation planning (later phases).
 3. **Classification gate** (score ≥ `CLASSIFICATION_MIN_SCORE`, or saved/approved) plus explicit
    Classify/Reclassify; idempotent per (taxonomy, prompt, input fingerprint).
 4. **Review and rights are append-only, cluster-level histories**; approval ≠ rights.
-5. **Singleton clusters** until near-duplicate detection exists (honestly labeled).
+5. **Singleton clusters** until near-duplicate detection exists (superseded in Phase 4.5).
 6. **Server-rendered internal dashboard** reading `@vd/review`; optional token gate only.
+
+## Decisions (Phase 4.5)
+
+1. **Exact identity stays authoritative**; near-duplicates are a separate evidence layer that
+   only relates different `(platform, platform_video_id)` pairs.
+2. **Deterministic, explainable detector** (per-signal evidence + points), no LLM, no
+   popularity or category inputs.
+3. **Conservative:** ≥2 independent signals, duration veto, strict multi-signal cross-platform
+   auto-confirmation; false merges are worse than missed merges.
+4. **Merges move, never delete**, and record conflicts; review/rights conflicts need a human;
+   rights are never widened by a merge.
+5. **Bounded blocking** (duration, hash bands, tokens; LIMIT per block) instead of all-pairs.
+6. **Thumbnail hashing only via an allowlisted, SSRF-hardened fetch**; failures are statuses.
+7. **Duplicate analysis never blocks discovery:** async job, and the last isolated step of `tick`.

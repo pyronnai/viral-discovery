@@ -10,6 +10,7 @@ import {
 import { DEFAULT_SCORING_CONFIG } from '@vd/scoring';
 import type { ClassifierSetup } from '@vd/classification';
 import { classifyClusterHandler } from './classify-handler.ts';
+import { scanDuplicatesHandler } from './duplicates-handler.ts';
 import type { JobHandlerMap } from './handlers.ts';
 
 /** Pipeline functions, injectable so handler wiring can be tested without a database. */
@@ -40,9 +41,14 @@ const DEFAULT_IMPL: PipelineImpl = { runSourceQuery, refreshMetrics, scoreVideo,
 export function pipelineHandlers(
   deps: PipelineDeps,
   impl: PipelineImpl = DEFAULT_IMPL,
-  options: { discoveryLimit?: number; classifier?: ClassifierSetup } = {},
+  options: {
+    discoveryLimit?: number;
+    classifier?: ClassifierSetup;
+    duplicates?: Parameters<typeof scanDuplicatesHandler>[1];
+  } = {},
 ): JobHandlerMap {
   return {
+    'scan-duplicates': scanDuplicatesHandler(deps, options.duplicates),
     'classify-cluster': classifyClusterHandler(
       deps,
       options.classifier ?? { configured: false, reason: 'no classifier configured' },

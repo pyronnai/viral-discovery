@@ -12,6 +12,7 @@ export const QUEUE_OPTIONS: Record<JobName, Omit<Queue, 'name'>> = {
   'refresh-metrics': { retryLimit: 3, retryBackoff: true, expireInSeconds: 10 * 60 },
   'score-video': { retryLimit: 2, retryBackoff: true, expireInSeconds: 5 * 60 },
   'classify-cluster': { retryLimit: 2, retryBackoff: true, expireInSeconds: 10 * 60 },
+  'scan-duplicates': { retryLimit: 2, retryBackoff: true, expireInSeconds: 10 * 60 },
 };
 
 type QueueAdmin = Pick<PgBoss, 'createQueue' | 'getQueue'>;
