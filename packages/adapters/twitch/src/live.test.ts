@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { safeNormalize } from '@vd/adapter-contract';
+import { checkRefreshResults, safeNormalize } from '@vd/adapter-contract';
 import { collect, testAdapterContext } from '@vd/adapter-contract/testing';
 import { createTwitchAdapter } from './adapter.ts';
 
@@ -9,11 +9,12 @@ const clientSecret = process.env['TWITCH_CLIENT_SECRET'];
 describe.skipIf(!process.env['LIVE_API_TESTS'] || !clientId || !clientSecret)(
   'twitch (live)',
   () => {
-    it('discovers recent clips for a game', async () => {
+    it('discovers recent clips for a game and refreshes them by id', async () => {
       const adapter = createTwitchAdapter({
         clientId: clientId ?? '',
         clientSecret: clientSecret ?? '',
       });
+      const ctx = testAdapterContext({ now: new Date() });
       const items = await collect(
         adapter.discoverTrending!(
           {
@@ -26,10 +27,20 @@ describe.skipIf(!process.env['LIVE_API_TESTS'] || !clientId || !clientSecret)(
             region: null,
             limit: 5,
           },
-          testAdapterContext({ now: new Date() }),
+          ctx,
         ),
       );
-      expect(items.map((i) => safeNormalize(adapter, i)).every((r) => r.ok)).toBe(true);
+      expect(items.length).toBeGreaterThan(0);
+      const videos = items.map((i) => safeNormalize(adapter, i));
+      expect(videos.every((v) => v.ok)).toBe(true);
+      const refs = videos.flatMap((v) =>
+        v.ok
+          ? [{ platformVideoId: v.value.platformVideoId, canonicalUrl: v.value.canonicalUrl }]
+          : [],
+      );
+      const refreshed = await adapter.refreshMetrics!(refs, ctx);
+      expect(checkRefreshResults(adapter, refreshed).every((r) => r.ok)).toBe(true);
+      expect(refreshed.some((r) => r.availability === 'available')).toBe(true);
     }, 30_000);
   },
 );
