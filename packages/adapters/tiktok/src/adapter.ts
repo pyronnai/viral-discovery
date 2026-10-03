@@ -1,13 +1,17 @@
 /**
- * TikTok public-data adapter: direct TikTok discovery, URL lookup (reference
- * enrichment) and metric refresh through a provider-neutral TikTokPublicProvider.
- * Nothing here knows which provider is behind it.
+ * Provider-neutral TikTok adapter: discovery, URL lookup (reference enrichment) and
+ * metric refresh through a TikTokPublicProvider. Nothing here knows which source is
+ * behind it.
+ *
+ * NOT wired into the registry: no free/no-cost TikTok source exists yet (paid data
+ * providers are out of scope for this project). It is kept, with its tests, so a
+ * future free source only has to implement TikTokPublicProvider.
  */
 import { z } from 'zod';
 import {
   AdapterManifestSchema,
-  QuotaBudgetExhaustedError,
   consumeQuota,
+  type AdapterManifest,
   parseParams,
   type AdapterContext,
   type DiscoveryRequest,
@@ -27,41 +31,34 @@ import type {
 } from './provider.ts';
 
 export const TIKTOK_ADAPTER_ID = 'tiktok';
-/** Providers bill per delivered record: a local daily cost guard (configurable per source). */
-export const DEFAULT_DAILY_RECORD_BUDGET = 1_000;
 
-export const manifest = AdapterManifestSchema.parse({
-  id: TIKTOK_ADAPTER_ID,
-  platform: 'tiktok',
-  displayName: 'TikTok public data',
-  version: '1.0.0',
-  accessMethod: 'third_party_provider',
-  capabilities: ['discovery.search', 'discovery.url', 'metrics.refresh', 'normalize'],
-  metricsProvided: ['views', 'likes', 'comments', 'shares'],
-  quotaBuckets: [
-    {
-      name: 'records',
-      unit: 'records',
-      defaultDailyBudget: DEFAULT_DAILY_RECORD_BUDGET,
-      notes:
-        'Local cost guard, not a platform limit: providers bill per delivered record. Override with sources.daily_quota_budgets.',
-    },
-    {
-      name: 'requests',
-      unit: 'requests',
-      defaultDailyBudget: null,
-      notes: 'HTTP requests to the provider (trigger, progress, download)',
-    },
-  ],
-  // Which variables are needed depends on the provider; the wiring reports them.
-  requiredEnv: [],
-  docsPath: 'docs/sources/tiktok.md',
-});
+/** The manifest for a given provider (its display name and access method). */
+export function tiktokManifest(provider: TikTokPublicProvider): AdapterManifest {
+  return AdapterManifestSchema.parse({
+    id: TIKTOK_ADAPTER_ID,
+    platform: 'tiktok',
+    displayName: `TikTok via ${provider.displayName}`,
+    version: '1.0.0',
+    accessMethod: provider.accessMethod,
+    capabilities: ['discovery.search', 'discovery.url', 'metrics.refresh', 'normalize'],
+    metricsProvided: ['views', 'likes', 'comments', 'shares'],
+    quotaBuckets: [
+      {
+        name: 'requests',
+        unit: 'requests',
+        defaultDailyBudget: null,
+        notes: 'HTTP requests the provider makes',
+      },
+    ],
+    requiredEnv: [],
+    docsPath: 'docs/sources/tiktok.md',
+  });
+}
 
 /** SourceQuery kind "search": one keyword or hashtag per stored query. */
 export const SearchParamsSchema = z.object({
   q: z.string().trim().min(1, 'a search keyword is required').max(100),
-  /** Posts to request (each delivered record is billed). */
+  /** Posts to request. */
   maxResults: z.coerce.number().int().min(1).max(100).default(20),
   /** Optional ISO country hint for the provider. */
   country: z
@@ -114,6 +111,7 @@ export interface TikTokAdapterOptions {
 
 export function createTikTokAdapter(options: TikTokAdapterOptions): SourceAdapter {
   const { provider } = options;
+  const manifest = tiktokManifest(provider);
 
   const callContext = (ctx: AdapterContext): TikTokProviderCallContext => ({
     signal: ctx.signal,
@@ -124,19 +122,6 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): SourceAdapte
     },
   });
 
-  /** How many records the local budget still allows (null = unlimited). */
-  function recordAllowance(ctx: AdapterContext, wanted: number): number {
-    const remaining = ctx.quota.remaining('records');
-    if (remaining === null) return wanted;
-    if (remaining < 1) throw new QuotaBudgetExhaustedError('records');
-    return Math.min(wanted, remaining);
-  }
-
-  /** Bills delivered records against the local budget (allowance ensures they fit). */
-  function billRecords(ctx: AdapterContext, delivered: number) {
-    if (delivered > 0) consumeQuota(ctx.quota, 'records', delivered);
-  }
-
   async function lookupBatch(
     urls: readonly string[],
     ctx: AdapterContext,
@@ -144,11 +129,8 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): SourceAdapte
     const byId = new Map<string, TikTokPublicPost>();
     for (let i = 0; i < urls.length; i += provider.maxLookupBatch) {
       const batch = urls.slice(i, i + provider.maxLookupBatch);
-      const allowed = recordAllowance(ctx, batch.length);
-      const result = await provider.lookupPosts(batch.slice(0, allowed), callContext(ctx));
-      billRecords(ctx, result.posts.length);
+      const result = await provider.lookupPosts(batch, callContext(ctx));
       for (const post of result.posts) byId.set(post.videoId, post);
-      if (allowed < batch.length) throw new QuotaBudgetExhaustedError('records');
     }
     return byId;
   }
@@ -182,12 +164,14 @@ export function createTikTokAdapter(options: TikTokAdapterOptions): SourceAdapte
 
     async *discoverSearch(req: DiscoveryRequest, ctx: AdapterContext) {
       const params = parseParams(TIKTOK_ADAPTER_ID, SearchParamsSchema, req.params);
-      const limit = recordAllowance(ctx, Math.min(params.maxResults, req.limit));
       const result = await provider.searchPosts(
-        { keyword: params.q, limit, country: params.country ?? null },
+        {
+          keyword: params.q,
+          limit: Math.min(params.maxResults, req.limit),
+          country: params.country ?? null,
+        },
         callContext(ctx),
       );
-      billRecords(ctx, result.posts.length);
       const fetchedAt = ctx.now();
       let rank = 0;
       for (const post of result.posts) {

@@ -40,20 +40,20 @@ re-host third-party media, and it does not depend on any generative-video tool.
 
 ## Packages
 
-| Package                | Role                                                                                                                | Depends on             |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `@vd/config`           | Zod-validated env (adapter credentials optional), Pino logger factory.                                              | —                      |
-| `@vd/core`             | Storage-agnostic domain types, enums, metric model, job contracts.                                                  | —                      |
-| `@vd/url-identity`     | Pure URL → canonical identity for YouTube, TikTok, Twitch clips. No network, never guesses.                         | —                      |
-| `@vd/url-resolution`   | Network step above it: allowlisted, bounded expansion of TikTok short links (no generic redirect following).        | url-identity           |
-| `@vd/scoring`          | Pure, deterministic breakout score v1 (components, confidence, explanation, evidence fingerprint). No DB, no clock. | core                   |
-| `@vd/adapter-contract` | `SourceAdapter` interface, manifest, normalized schemas, quota budget, registry, HTTP helper, contract test kit.    | core, config           |
-| `@vd/adapter-*`        | `youtube`, `twitch`, `bluesky`, `manual-url`, `tiktok` (provider-neutral; Bright Data first): one platform each.    | contract, url-identity |
-| `@vd/adapter-wiring`   | **The only place adapters are instantiated**; registers each one only if its own env vars are set.                  | adapters               |
-| `@vd/db`               | Drizzle schema, client, migrations, health check.                                                                   | core, config           |
-| `@vd/pipeline`         | Platform-agnostic ingestion: normalize → identity → creator/video upsert → sighting → snapshot → run stats.         | contract, db           |
-| `@vd/worker` (app)     | pg-boss runtime: queues, handler registration.                                                                      | wiring, db             |
-| `@vd/cli` (app)        | `health`, `config-check`, `db-check`, `adapters`, `discover`, `submit-url`, `refresh-metrics`.                      | wiring, pipeline       |
+| Package                | Role                                                                                                                          | Depends on             |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `@vd/config`           | Zod-validated env (adapter credentials optional), Pino logger factory.                                                        | —                      |
+| `@vd/core`             | Storage-agnostic domain types, enums, metric model, job contracts.                                                            | —                      |
+| `@vd/url-identity`     | Pure URL → canonical identity for YouTube, TikTok, Twitch clips. No network, never guesses.                                   | —                      |
+| `@vd/url-resolution`   | Network step above it: allowlisted, bounded expansion of TikTok short links (no generic redirect following).                  | url-identity           |
+| `@vd/scoring`          | Pure, deterministic breakout score v1 (components, confidence, explanation, evidence fingerprint). No DB, no clock.           | core                   |
+| `@vd/adapter-contract` | `SourceAdapter` interface, manifest, normalized schemas, quota budget, registry, HTTP helper, contract test kit.              | core, config           |
+| `@vd/adapter-*`        | `youtube`, `twitch`, `bluesky`, `manual-url`, `tiktok` (provider-neutral, not wired — no free source yet): one platform each. | contract, url-identity |
+| `@vd/adapter-wiring`   | **The only place adapters are instantiated**; registers each one only if its own env vars are set.                            | adapters               |
+| `@vd/db`               | Drizzle schema, client, migrations, health check.                                                                             | core, config           |
+| `@vd/pipeline`         | Platform-agnostic ingestion: normalize → identity → creator/video upsert → sighting → snapshot → run stats.                   | contract, db           |
+| `@vd/worker` (app)     | pg-boss runtime: queues, handler registration.                                                                                | wiring, db             |
+| `@vd/cli` (app)        | `health`, `config-check`, `db-check`, `adapters`, `discover`, `submit-url`, `refresh-metrics`.                                | wiring, pipeline       |
 
 Rule: **core and the pipeline never import an adapter, and nothing but
 `@vd/adapter-wiring` instantiates adapters** (the worker and CLI both call it). Adding

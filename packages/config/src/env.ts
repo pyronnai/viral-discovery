@@ -32,22 +32,6 @@ export const EnvSchema = z.object({
   TWITCH_CLIENT_SECRET: z.string().min(1).optional(),
   /** Unauthenticated Bluesky AppView host. Defaults to https://api.bsky.app. */
   BLUESKY_APPVIEW_URL: z.url({ protocol: /^https$/ }).optional(),
-  /**
-   * Public TikTok data provider. Default: "brightdata" when BRIGHTDATA_API_TOKEN is
-   * set, otherwise "none" (TikTok discovery disabled). See docs/sources/tiktok.md.
-   */
-  TIKTOK_PUBLIC_PROVIDER: z.enum(['brightdata', 'none']).optional(),
-  /** Bright Data API token (Web Scraper API). Secret; never logged. */
-  BRIGHTDATA_API_TOKEN: z.string().min(1).optional(),
-  /** Bright Data "TikTok - Posts" dataset id (default: the documented gd_lu702nij2f790tmv9h). */
-  BRIGHTDATA_TIKTOK_DATASET_ID: z
-    .string()
-    .regex(/^gd_[a-z0-9]+$/, 'BRIGHTDATA_TIKTOK_DATASET_ID must look like gd_…')
-    .optional(),
-  /** Bright Data API base URL (default https://api.brightdata.com). */
-  BRIGHTDATA_API_URL: z.url({ protocol: /^https$/ }).optional(),
-  /** Longest wait for one Bright Data collection job, in seconds (default 600). */
-  BRIGHTDATA_MAX_WAIT_SECONDS: z.coerce.number().int().min(10).max(3_600).optional(),
 
   // ── content classification (optional; dashboard works without it) ─────────
   /** Default: "anthropic" when ANTHROPIC_API_KEY is set, otherwise "none". */
@@ -75,7 +59,6 @@ export const EnvSchema = z.object({
 export const SECRET_ENV_KEYS = [
   'YOUTUBE_API_KEY',
   'TWITCH_CLIENT_SECRET',
-  'BRIGHTDATA_API_TOKEN',
   'ANTHROPIC_API_KEY',
   'DASHBOARD_ACCESS_TOKEN',
 ] as const;

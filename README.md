@@ -8,9 +8,8 @@ original → track what you obtained and already used. **You** do the editing, c
 captions and publishing externally — the system never downloads media, plans compilations,
 or publishes anything.
 
-**Status: Phase 5 — daily viral-video inbox.** Sources: YouTube, Twitch, Bluesky, TikTok
-(direct discovery through a public-data provider, Bright Data first — needs `BRIGHTDATA_API_TOKEN`),
-and manual URLs (incl. TikTok via oEmbed); Reddit is access-gated. No source is the "center": every
+**Status: Phase 5 — daily viral-video inbox.** Sources: YouTube, Twitch, Bluesky, and manual
+URLs (incl. TikTok via oEmbed); Reddit is access-gated. No source is the "center": every
 adapter feeds the same inbox. See [`docs/architecture.md`](docs/architecture.md) and
 [`docs/sources/`](docs/sources/).
 
@@ -43,7 +42,6 @@ pnpm cli discover youtube --param regionCode=US,GB --param videoCategoryId=23 --
 pnpm cli discover twitch --param gameId=509658 --param lookbackHours=24
 pnpm cli discover twitch --kind channel_feed --param broadcasterId=12345
 pnpm cli discover --query <source_queries.id>        # run a stored SourceQuery
-pnpm cli discover tiktok --param q="funny animals" --param maxResults=20   # BRIGHTDATA_API_TOKEN
 pnpm cli submit-url 'https://www.tiktok.com/@user/video/7412345678901234567'
 pnpm cli refresh-metrics youtube --limit 200         # append metric snapshots
 pnpm cli enrich-references --limit 25                # look up reference-only videos on their own platform
@@ -159,7 +157,6 @@ packages/adapters/youtube    YouTube Data API v3 (mostPopular charts, batchGetSt
 packages/adapters/twitch     Twitch Helix clips
 packages/adapters/bluesky    Bluesky AppView search (native videos + linked videos)
 packages/adapters/manual-url pasted URLs (+ TikTok oEmbed)
-packages/adapters/tiktok     TikTok public data via a provider-neutral interface (Bright Data first)
 packages/adapters/wiring     the one place adapters are instantiated
 docs/                  architecture + per-source access/compliance notes
 ```

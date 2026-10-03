@@ -159,15 +159,8 @@ describe('adapters', () => {
       ['twitch', false, ['TWITCH_CLIENT_SECRET']],
       ['bluesky', true, []],
       ['manual-url', true, []],
-      ['tiktok', false, ['BRIGHTDATA_API_TOKEN']],
     ]);
     expect(h.out.join('\n')).not.toContain('yt-secret-value');
-    // With a provider token, TikTok is configured and the token is never printed.
-    const t = harness({ BRIGHTDATA_API_TOKEN: 'bd-secret-value-123' });
-    await t.run('adapters');
-    await t.run('adapters', '--json');
-    expect(t.out.join('\n')).toMatch(/TikTok public data via Bright Data/);
-    expect(t.out.join('\n') + t.err.join('\n')).not.toContain('bd-secret-value-123');
   });
 });
 

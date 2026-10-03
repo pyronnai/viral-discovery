@@ -13,7 +13,6 @@ describe('buildAdapterRegistry', () => {
     expect(statuses.filter((s) => !s.configured).map((s) => [s.id, s.missingEnv])).toEqual([
       ['youtube', ['YOUTUBE_API_KEY']],
       ['twitch', ['TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET']],
-      ['tiktok', ['BRIGHTDATA_API_TOKEN']],
     ]);
   });
 
@@ -23,36 +22,7 @@ describe('buildAdapterRegistry', () => {
       twitch: 'propagation',
       bluesky: 'propagation',
       'manual-url': 'provenance',
-      tiktok: 'propagation',
     });
-  });
-
-  it('keeps TikTok public discovery disabled until a provider token is configured', () => {
-    const off = buildAdapterRegistry({});
-    expect(off.registry.has('tiktok')).toBe(false);
-    expect(off.statuses.find((s) => s.id === 'tiktok')).toMatchObject({
-      configured: false,
-      displayName: 'TikTok public data (no provider configured)',
-      missingEnv: ['BRIGHTDATA_API_TOKEN'],
-    });
-    // The token alone selects Bright Data; the value never appears in any status/message.
-    const on = buildAdapterRegistry({ BRIGHTDATA_API_TOKEN: 'secret-token-value' });
-    expect(on.registry.has('tiktok')).toBe(true);
-    const status = on.statuses.find((s) => s.id === 'tiktok');
-    expect(status).toMatchObject({
-      configured: true,
-      displayName: 'TikTok public data via Bright Data',
-    });
-    expect(JSON.stringify(on.statuses)).not.toContain('secret-token-value');
-    // An explicit "none" wins over a present token.
-    const disabled = buildAdapterRegistry({
-      TIKTOK_PUBLIC_PROVIDER: 'none',
-      BRIGHTDATA_API_TOKEN: 'secret-token-value',
-    });
-    expect(disabled.registry.has('tiktok')).toBe(false);
-    expect(unconfiguredMessage(off.statuses, 'tiktok')).toBe(
-      'adapter "tiktok" is not configured: set BRIGHTDATA_API_TOKEN (see docs/sources/tiktok.md)',
-    );
   });
 
   it('registers each adapter independently once its own variables are set', () => {

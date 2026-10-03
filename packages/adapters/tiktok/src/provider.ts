@@ -1,13 +1,16 @@
 /**
  * Provider-neutral contract for PUBLIC TikTok data. The TikTok adapter (and the
- * rest of the application) only ever sees these shapes; each provider's own
- * response format ends at its implementation (e.g. brightdata.ts).
+ * rest of the application) only ever sees these shapes; a source's own response
+ * format must end at its implementation.
+ *
+ * No implementation exists yet: the project only uses free/no-cost sources, and
+ * none currently offers TikTok discovery with metrics.
  *
  * Only public video metadata needed for discovery and ranking. Never: media
  * files or media URLs, private/profile-only data (bios, avatars, contact data),
  * other users' comments, or session tokens.
  */
-import type { FetchLike } from '@vd/adapter-contract';
+import type { AccessMethod } from '@vd/adapter-contract';
 
 /** One public TikTok video as any provider must report it. Unknown = null, never guessed. */
 export interface TikTokPublicPost {
@@ -61,9 +64,11 @@ export interface TikTokProviderCallContext {
 }
 
 export interface TikTokPublicProvider {
-  /** Stable id, e.g. "brightdata". */
+  /** Stable id of the source. */
   readonly id: string;
   readonly displayName: string;
+  /** How the source is accessed (an official API, feed, …); becomes the adapter's. */
+  readonly accessMethod: AccessMethod;
   /** Public posts for a keyword/hashtag search, at most `limit`. */
   searchPosts(
     query: { keyword: string; limit: number; country: string | null },
@@ -76,8 +81,4 @@ export interface TikTokPublicProvider {
   ): Promise<TikTokProviderResult>;
   /** Largest number of URLs one lookupPosts call should carry. */
   readonly maxLookupBatch: number;
-}
-
-export interface TikTokProviderOptions {
-  fetch?: FetchLike;
 }
