@@ -189,6 +189,8 @@ describe('refresh ladder', () => {
       kind: 'search',
       params: { q: 'funny' },
       limit: 50,
+      // The ladder path for references that were not enriched at discovery time.
+      enrichReferences: false,
     });
     const cat = await videoId('vdFixture01');
     expect(await snapshotsOf(cat)).toHaveLength(0);

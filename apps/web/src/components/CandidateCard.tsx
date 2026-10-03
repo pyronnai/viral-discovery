@@ -4,6 +4,7 @@ import { DuplicateIndicator } from './Duplicates.tsx';
 import { ScoreBadge, ScoreBreakdown, SourcesBlock } from './Evidence.tsx';
 import { InboxActions } from './InboxActions.tsx';
 import { Representations, StateBadges } from './Representations.tsx';
+import { SourceModerationWarning } from './SourceModeration.tsx';
 import { Thumbnail } from './Thumbnail.tsx';
 
 /**
@@ -28,7 +29,7 @@ export function CandidateCard({ card }: { card: CardView }) {
     : null;
   return (
     <article
-      className={`card${significant.length ? ' card-flagged' : ''}${card.inbox.used ? ' card-used' : ''}`}
+      className={`card${significant.length || card.sourceModeration.explicit ? ' card-flagged' : ''}${card.inbox.used ? ' card-used' : ''}`}
     >
       <input
         type="checkbox"
@@ -94,6 +95,7 @@ export function CandidateCard({ card }: { card: CardView }) {
             </span>
           ))}
         </div>
+        <SourceModerationWarning moderation={card.sourceModeration} compact />
         <div className="card-facts">
           {metrics ? <span>{metrics}</span> : <span className="muted">no canonical metrics</span>}
           <span

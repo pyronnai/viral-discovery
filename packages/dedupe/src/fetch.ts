@@ -11,10 +11,14 @@
  *  - redirects are followed manually (max 3) and re-validated;
  *  - no cookies, no Authorization/credential headers are ever sent;
  *  - bounded body size (streaming cutoff), image content-type required, overall timeout.
+ *    The one exception: hosts in `genericBinaryHosts` (observed serving real
+ *    thumbnails as application/octet-stream) may send that generic type, and
+ *    then the BYTES must prove a supported image (magic bytes) before acceptance.
  */
 import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
 import { request } from 'node:https';
 import { isIP } from 'node:net';
+import { sniffFormat } from './image.ts';
 
 /** Thumbnail CDNs our adapters emit (suffix match on DNS labels). */
 export const TRUSTED_THUMBNAIL_HOSTS = [
@@ -29,8 +33,18 @@ export const TRUSTED_THUMBNAIL_HOSTS = [
   'bsky.app', // Bluesky CDN (cdn.bsky.app / video.bsky.app thumbnails)
 ] as const;
 
+/**
+ * Allowed hosts observed serving valid thumbnails as `application/octet-stream`
+ * (exact host or subdomain). Live 2026-10-03: video.bsky.app/…/thumbnail.jpg
+ * redirects to video.cdn.bsky.app, which answers 200 application/octet-stream
+ * with JPEG bytes. Must also be in allowedHosts.
+ */
+export const GENERIC_BINARY_THUMBNAIL_HOSTS = ['video.cdn.bsky.app'] as const;
+
 export interface FetchPolicy {
   allowedHosts: readonly string[];
+  /** Hosts whose generic binary content-type is checked by magic bytes instead of refused. */
+  genericBinaryHosts?: readonly string[];
   maxBytes: number;
   timeoutMs: number;
   maxRedirects: number;
@@ -38,6 +52,7 @@ export interface FetchPolicy {
 
 export const DEFAULT_FETCH_POLICY: FetchPolicy = {
   allowedHosts: TRUSTED_THUMBNAIL_HOSTS,
+  genericBinaryHosts: GENERIC_BINARY_THUMBNAIL_HOSTS,
   maxBytes: 2_000_000,
   timeoutMs: 6_000,
   maxRedirects: 3,
@@ -252,11 +267,15 @@ export async function fetchThumbnail(
         return { ok: false, status: 'http_error', reason: `HTTP ${res.status}` };
       }
       const type = (res.contentType ?? '').replace(/;.*$/, '').trim().toLowerCase();
-      if (!type.startsWith('image/')) {
+      // Only for listed hosts: the generic type defers the decision to the bytes.
+      const sniffBytes =
+        type === 'application/octet-stream' &&
+        hostAllowed(checked.url.hostname, policy.genericBinaryHosts ?? []);
+      if (!sniffBytes && !type.startsWith('image/')) {
         res.destroy();
         return { ok: false, status: 'not_an_image', reason: `content-type ${type || 'missing'}` };
       }
-      if (type !== 'image/jpeg' && type !== 'image/jpg' && type !== 'image/png') {
+      if (!sniffBytes && type !== 'image/jpeg' && type !== 'image/jpg' && type !== 'image/png') {
         res.destroy();
         return { ok: false, status: 'unsupported_format', reason: `content-type ${type}` };
       }
@@ -279,6 +298,17 @@ export async function fetchThumbnail(
       for (const c of chunks) {
         bytes.set(c, offset);
         offset += c.byteLength;
+      }
+      if (sniffBytes) {
+        const format = sniffFormat(bytes);
+        if (format !== 'jpeg' && format !== 'png') {
+          return {
+            ok: false,
+            status: format ? 'unsupported_format' : 'not_an_image',
+            reason: `content-type ${type}; bytes are ${format ?? 'not a known image format'}`,
+          };
+        }
+        return { ok: true, bytes, contentType: `image/${format}`, finalUrl: checked.url.href };
       }
       return { ok: true, bytes, contentType: type, finalUrl: checked.url.href };
     }

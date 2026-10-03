@@ -32,6 +32,7 @@ describe('cli program', () => {
       'discover',
       'discover-due',
       'duplicates',
+      'enrich-references',
       'health',
       'queries',
       'refresh-metrics',

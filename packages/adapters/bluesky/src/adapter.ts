@@ -13,6 +13,7 @@ import {
   type NormalizedVideo,
   type RawItem,
   type SourceAdapter,
+  type SourceModerationLabel,
   type VideoRef,
 } from '@vd/adapter-contract';
 import { buildReadings, metricUnavailable, metricValue, type MetricReadings } from '@vd/core';
@@ -80,6 +81,8 @@ const Author = z.object({
   did: z.string().min(1),
   handle: z.string().min(1),
   displayName: z.string().optional(),
+  /** com.atproto.label.defs#label[] — validated per entry by moderationLabels(). */
+  labels: z.array(z.unknown()).optional(),
 });
 const ExternalView = z.object({
   $type: z.literal('app.bsky.embed.external#view'),
@@ -107,8 +110,12 @@ export const PostView = z.object({
     createdAt: z.string().optional(),
     langs: z.array(z.string()).optional(),
     facets: z.array(Facet).optional(),
+    /** com.atproto.label.defs#selfLabels — the author's own content warnings. */
+    labels: z.unknown().optional(),
   }),
   embed: z.unknown().optional(),
+  /** com.atproto.label.defs#label[] applied to this post (moderation service + self-labels). */
+  labels: z.array(z.unknown()).optional(),
   likeCount: z.number().int().nonnegative().optional(),
   replyCount: z.number().int().nonnegative().optional(),
   repostCount: z.number().int().nonnegative().optional(),
@@ -116,6 +123,74 @@ export const PostView = z.object({
   indexedAt: z.string(),
 });
 export type PostView = z.infer<typeof PostView>;
+
+/** com.atproto.label.defs#label (only the fields used here). */
+const Label = z.object({
+  src: z.string().min(1),
+  uri: z.string().min(1),
+  val: z.string().min(1),
+  neg: z.boolean().optional(),
+  exp: z.string().optional(),
+});
+const SelfLabels = z.object({
+  $type: z.literal('com.atproto.label.defs#selfLabels').optional(),
+  values: z.array(z.object({ val: z.string().min(1) })),
+});
+
+/**
+ * Bluesky's global label values for adult or graphic content (AT Protocol
+ * moderation docs: "porn", "sexual", "nudity", "graphic-media"). Other values —
+ * custom labeler values, "!warn", "bot", … — are kept but not treated as explicit.
+ */
+export const EXPLICIT_LABEL_VALUES: readonly string[] = [
+  'porn',
+  'sexual',
+  'nudity',
+  'graphic-media',
+];
+
+/**
+ * The moderation labels that apply to a post, as the AppView reported them:
+ *  - labels on the post itself (moderation services and the author's self-labels),
+ *  - the record's self-labels (normally mirrored in post.labels; deduplicated),
+ *  - labels on the author's ACCOUNT (uri = the DID), which cover all their content.
+ * Labels on the author's profile record (…/app.bsky.actor.profile/self) describe
+ * only the profile and are ignored. Negated (neg) and expired (exp) labels are dropped.
+ */
+export function moderationLabels(post: PostView, at: Date): SourceModerationLabel[] {
+  const did = post.author.did;
+  const entries: (z.infer<typeof Label> & { scope: 'content' | 'account' })[] = [];
+  for (const raw of post.labels ?? []) {
+    const label = Label.safeParse(raw);
+    if (label.success) entries.push({ ...label.data, scope: 'content' });
+  }
+  for (const raw of post.author.labels ?? []) {
+    const label = Label.safeParse(raw);
+    if (label.success && label.data.uri === did) entries.push({ ...label.data, scope: 'account' });
+  }
+  const self = SelfLabels.safeParse(post.record.labels);
+  if (self.success) {
+    for (const { val } of self.data.values)
+      entries.push({ src: did, uri: post.uri, val, scope: 'content' });
+  }
+  const key = (l: { src: string; uri: string; val: string }) => `${l.src}|${l.uri}|${l.val}`;
+  const negated = new Set(entries.filter((l) => l.neg).map(key));
+  const byIdentity = new Map<string, SourceModerationLabel>();
+  for (const l of entries) {
+    if (l.neg || negated.has(key(l))) continue;
+    const expires = l.exp ? new Date(l.exp) : null;
+    if (expires && !Number.isNaN(expires.getTime()) && expires <= at) continue;
+    const label: SourceModerationLabel = {
+      value: l.val,
+      labeler: l.src,
+      scope: l.scope,
+      selfApplied: l.src === did,
+      explicit: EXPLICIT_LABEL_VALUES.includes(l.val),
+    };
+    byIdentity.set(`${label.scope}|${label.labeler}|${label.value}`, label);
+  }
+  return [...byIdentity.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, l]) => l);
+}
 
 const SearchResponse = z.object({
   posts: z.array(z.unknown()),
@@ -434,6 +509,7 @@ export function createBlueskyAdapter(options: BlueskyAdapterOptions = {}): Sourc
                   platformVideoId: uri,
                   availability: 'available',
                   metrics: postMetrics(post),
+                  moderationLabels: moderationLabels(post, observedAt),
                   observedAt,
                 }
               : // getPosts silently omits deleted or hidden posts.
@@ -505,6 +581,7 @@ export function createBlueskyAdapter(options: BlueskyAdapterOptions = {}): Sourc
         contentOrigin: 'discovered_external',
         availability: 'available',
         metrics: postMetrics(post),
+        moderationLabels: moderationLabels(post, raw.fetchedAt),
         observedAt: raw.fetchedAt,
       };
     },

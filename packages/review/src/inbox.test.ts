@@ -51,6 +51,58 @@ async function confirmedRepost() {
   return { repost, pairId: pair!.id };
 }
 
+describe('source moderation (platform labels, not AI)', () => {
+  const MOD = 'did:plc:ar7c4by46qjdydhdevvrndac';
+  const label = (value: string, explicit: boolean, selfApplied = false) => ({
+    value,
+    labeler: MOD,
+    scope: 'content' as const,
+    selfApplied,
+    explicit,
+  });
+  const setLabels = (videoId: string, labels: ReturnType<typeof label>[]) =>
+    db
+      .update(schema.videos)
+      .set({ sourceModerationLabels: labels })
+      .where(sqlEq(schema.videos.id, videoId));
+
+  it('keeps explicitly labelled content out of Viral Now but visible in All and Flagged', async () => {
+    await setLabels(seeded.breakout.videoId, [label('porn', true)]);
+    await setLabels(seeded.provisional.videoId, [label('!warn', false)]);
+
+    const viral = await ids({ view: 'viral' });
+    expect(viral).not.toContain(seeded.breakout.clusterId);
+    // A non-explicit platform label (e.g. "!warn") is not treated as adult content.
+    expect(viral).toContain(seeded.provisional.clusterId);
+    expect(await ids({ view: 'all' })).toContain(seeded.breakout.clusterId);
+    expect(await ids({ view: 'all', flagged: true })).toEqual([seeded.breakout.clusterId]);
+
+    const summary = await getSummary(db, NOW);
+    expect(summary.viralNow).toBe(1);
+    expect(summary.flagged).toBe(1);
+
+    const view = await card(seeded.breakout.clusterId);
+    expect(view.sourceModeration.explicit).toBe(true);
+    expect(view.sourceModeration.labels).toEqual([
+      expect.objectContaining({ value: 'porn', explicit: true, by: 'YouTube moderation' }),
+    ]);
+    // Platform labels are separate from (and independent of) AI classification.
+    expect(view.classification.kind).not.toBe('failed');
+    const [row] = await getExportRows(db, { clusterIds: [seeded.breakout.clusterId] });
+    expect(row?.platformLabels).toEqual(['youtube:porn']);
+  });
+
+  it('treats no reported labels (NULL) and an empty label set alike: nothing hidden', async () => {
+    const before = await ids({ view: 'viral' });
+    await setLabels(seeded.breakout.videoId, []);
+    expect(await ids({ view: 'viral' })).toEqual(before);
+    expect((await card(seeded.breakout.clusterId)).sourceModeration).toEqual({
+      explicit: false,
+      labels: [],
+    });
+  });
+});
+
 describe('Viral Now', () => {
   it('shows fresh, scored/provisional, untriaged breakouts by virality', async () => {
     expect(await ids({ view: 'viral' })).toEqual([
@@ -348,10 +400,10 @@ describe('export', () => {
     });
     const csv = toCsv(rows);
     expect(csv.split('\r\n')[0]).toBe(
-      'title,creator,creator_handle,platform,canonical_url,alternate_urls,virality_score,score_state,labels,duration_seconds,published_at,views,rights,review,obtained,obtained_at,obtained_note,possible_duplicates,media_download_available,cluster_id',
+      'title,creator,creator_handle,platform,canonical_url,alternate_urls,virality_score,score_state,labels,platform_labels,duration_seconds,published_at,views,rights,review,obtained,obtained_at,obtained_note,possible_duplicates,media_download_available,cluster_id',
     );
     expect(csv).toContain(
-      'Cat discovers the vacuum cleaner,Fixture Pets,,YouTube,https://example.test/youtube/vdFixture01,,78.8,scored,"animals, funny, unexpected",42,',
+      'Cat discovers the vacuum cleaner,Fixture Pets,,YouTube,https://example.test/youtube/vdFixture01,,78.8,scored,"animals, funny, unexpected",,42,',
     );
     const json = JSON.parse(toJson(rows, NOW)) as { count: number; note: string };
     expect(json.count).toBe(1);

@@ -9,6 +9,8 @@ export interface QuotaBudget {
   remaining(bucket: string): number | null;
   /** Units used so far, per bucket. */
   usage(): Readonly<Record<string, number>>;
+  /** Metered requests so far, per bucket: one per successful tryConsume(). */
+  requests(): Readonly<Record<string, number>>;
 }
 
 /**
@@ -17,6 +19,7 @@ export interface QuotaBudget {
  */
 export function createInMemoryQuotaBudget(limits: Readonly<Record<string, number>>): QuotaBudget {
   const used: Record<string, number> = {};
+  const requests: Record<string, number> = {};
   return {
     tryConsume(bucket, units) {
       if (!Number.isFinite(units) || units < 0) throw new RangeError('units must be >= 0');
@@ -24,6 +27,7 @@ export function createInMemoryQuotaBudget(limits: Readonly<Record<string, number
       const current = used[bucket] ?? 0;
       if (limit !== undefined && current + units > limit) return false;
       used[bucket] = current + units;
+      requests[bucket] = (requests[bucket] ?? 0) + 1;
       return true;
     },
     remaining(bucket) {
@@ -32,6 +36,9 @@ export function createInMemoryQuotaBudget(limits: Readonly<Record<string, number
     },
     usage() {
       return { ...used };
+    },
+    requests() {
+      return { ...requests };
     },
   };
 }

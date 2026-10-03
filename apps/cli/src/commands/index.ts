@@ -6,6 +6,7 @@ import { registerConfigCheck } from './config-check.ts';
 import { registerDbCheck } from './db-check.ts';
 import { registerDiscover } from './discover.ts';
 import { registerDuplicates } from './duplicates.ts';
+import { registerEnrichReferences } from './enrich-references.ts';
 import { registerHealth } from './health.ts';
 import { registerQueries } from './queries.ts';
 import { registerRefreshMetrics } from './refresh-metrics.ts';
@@ -25,6 +26,7 @@ export const COMMANDS: readonly CommandRegistrar[] = [
   registerAdapters,
   registerDiscover,
   registerSubmitUrl,
+  registerEnrichReferences,
   registerRefreshMetrics,
   registerQueries,
   registerScheduling,

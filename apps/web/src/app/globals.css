@@ -945,3 +945,11 @@ code {
     grid-column: 2 / -1;
   }
 }
+
+.source-moderation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+  margin: 0.25rem 0;
+}

@@ -1,0 +1,226 @@
+{
+  "posts": [
+    {
+      "uri": "at://did:plc:fixturelabelmod00000000/app.bsky.feed.post/3mwlabelmod1a",
+      "cid": "bafyreifixturelabelmodpost000000000000000000000000000000001",
+      "author": {
+        "did": "did:plc:fixturelabelmod00000000",
+        "handle": "labelled-mod.example.com",
+        "displayName": "Fixture Labelled (moderation service)",
+        "labels": [],
+        "createdAt": "2026-03-01T10:00:00.000Z"
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "fixture: native video labelled by the Bluesky moderation service",
+        "createdAt": "2026-10-03T01:28:10.000Z",
+        "embed": {
+          "$type": "app.bsky.embed.video",
+          "video": {
+            "$type": "blob",
+            "ref": { "$link": "bafkreifixturevideomod0000000000000000000000000000000000001" },
+            "mimeType": "video/mp4",
+            "size": 1000000
+          }
+        }
+      },
+      "embed": {
+        "$type": "app.bsky.embed.video#view",
+        "cid": "bafkreifixturevideomod0000000000000000000000000000000000001",
+        "playlist": "https://video.bsky.app/watch/did%3Aplc%3Afixturelabelmod00000000/bafkreifixturevideomod0000000000000000000000000000000000001/playlist.m3u8",
+        "thumbnail": "https://video.bsky.app/watch/did%3Aplc%3Afixturelabelmod00000000/bafkreifixturevideomod0000000000000000000000000000000000001/thumbnail.jpg"
+      },
+      "labels": [
+        {
+          "cid": "bafyreifixturelabelmodpost000000000000000000000000000000001",
+          "cts": "2026-10-03T01:28:14.744Z",
+          "src": "did:plc:ar7c4by46qjdydhdevvrndac",
+          "uri": "at://did:plc:fixturelabelmod00000000/app.bsky.feed.post/3mwlabelmod1a",
+          "val": "porn",
+          "ver": 1
+        }
+      ],
+      "likeCount": 3,
+      "replyCount": 0,
+      "repostCount": 0,
+      "quoteCount": 0,
+      "indexedAt": "2026-10-03T01:28:12.000Z"
+    },
+    {
+      "uri": "at://did:plc:fixturelabelself0000000/app.bsky.feed.post/3mwlabelself1",
+      "cid": "bafyreifixturelabelselfpost00000000000000000000000000000001",
+      "author": {
+        "did": "did:plc:fixturelabelself0000000",
+        "handle": "labelled-self.example.com",
+        "displayName": "Fixture Self-labelled",
+        "labels": []
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "fixture: native video with an author content warning",
+        "createdAt": "2026-10-03T01:20:00.000Z",
+        "labels": {
+          "$type": "com.atproto.label.defs#selfLabels",
+          "values": [{ "val": "nudity" }, { "val": "graphic-media" }]
+        }
+      },
+      "embed": {
+        "$type": "app.bsky.embed.video#view",
+        "cid": "bafkreifixturevideoself000000000000000000000000000000000001",
+        "playlist": "https://video.bsky.app/watch/did%3Aplc%3Afixturelabelself0000000/bafkreifixturevideoself000000000000000000000000000000000001/playlist.m3u8",
+        "thumbnail": "https://video.bsky.app/watch/did%3Aplc%3Afixturelabelself0000000/bafkreifixturevideoself000000000000000000000000000000000001/thumbnail.jpg"
+      },
+      "labels": [
+        {
+          "src": "did:plc:fixturelabelself0000000",
+          "uri": "at://did:plc:fixturelabelself0000000/app.bsky.feed.post/3mwlabelself1",
+          "cid": "bafyreifixturelabelselfpost00000000000000000000000000000001",
+          "val": "nudity",
+          "cts": "2026-10-03T01:20:00.000Z"
+        },
+        {
+          "src": "did:plc:fixturelabelself0000000",
+          "uri": "at://did:plc:fixturelabelself0000000/app.bsky.feed.post/3mwlabelself1",
+          "cid": "bafyreifixturelabelselfpost00000000000000000000000000000001",
+          "val": "graphic-media",
+          "cts": "2026-10-03T01:20:00.000Z"
+        }
+      ],
+      "likeCount": 1,
+      "replyCount": 0,
+      "indexedAt": "2026-10-03T01:20:02.000Z"
+    },
+    {
+      "uri": "at://did:plc:fixturelabelaccount0000/app.bsky.feed.post/3mwlabelacct1",
+      "cid": "bafyreifixturelabelacctpost00000000000000000000000000000001",
+      "author": {
+        "did": "did:plc:fixturelabelaccount0000",
+        "handle": "labelled-account.example.com",
+        "displayName": "Fixture Account-labelled",
+        "labels": [
+          {
+            "cts": "2026-07-08T00:56:20.507Z",
+            "src": "did:plc:ar7c4by46qjdydhdevvrndac",
+            "uri": "did:plc:fixturelabelaccount0000",
+            "val": "sexual",
+            "ver": 1
+          }
+        ]
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "fixture: native video whose account carries a moderation label",
+        "createdAt": "2026-10-03T01:10:00.000Z"
+      },
+      "embed": {
+        "$type": "app.bsky.embed.video#view",
+        "cid": "bafkreifixturevideoacct000000000000000000000000000000000001",
+        "thumbnail": "https://video.bsky.app/watch/did%3Aplc%3Afixturelabelaccount0000/bafkreifixturevideoacct000000000000000000000000000000000001/thumbnail.jpg"
+      },
+      "labels": [],
+      "likeCount": 0,
+      "replyCount": 0,
+      "indexedAt": "2026-10-03T01:10:01.000Z"
+    },
+    {
+      "uri": "at://did:plc:fixturelabelprofile0000/app.bsky.feed.post/3mwlabelprof1",
+      "cid": "bafyreifixturelabelprofpost00000000000000000000000000000001",
+      "author": {
+        "did": "did:plc:fixturelabelprofile0000",
+        "handle": "labelled-profile.example.com",
+        "displayName": "Fixture Profile-labelled",
+        "labels": [
+          {
+            "cid": "bafyreifixtureprofilerecord000000000000000000000000000001",
+            "cts": "2024-11-13T23:54:05.314Z",
+            "src": "did:plc:ar7c4by46qjdydhdevvrndac",
+            "uri": "at://did:plc:fixturelabelprofile0000/app.bsky.actor.profile/self",
+            "val": "porn",
+            "ver": 1
+          },
+          {
+            "src": "did:plc:fixturelabelprofile0000",
+            "uri": "at://did:plc:fixturelabelprofile0000/app.bsky.actor.profile/self",
+            "cid": "bafyreifixtureprofilerecord000000000000000000000000000001",
+            "val": "bot",
+            "cts": "2026-09-27T14:44:08.114Z"
+          }
+        ]
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "fixture: unlabelled post by an author whose PROFILE (not account) is labelled",
+        "createdAt": "2026-10-03T01:05:00.000Z"
+      },
+      "embed": {
+        "$type": "app.bsky.embed.video#view",
+        "cid": "bafkreifixturevideoprof000000000000000000000000000000000001",
+        "thumbnail": "https://video.bsky.app/watch/did%3Aplc%3Afixturelabelprofile0000/bafkreifixturevideoprof000000000000000000000000000000000001/thumbnail.jpg"
+      },
+      "labels": [],
+      "likeCount": 0,
+      "replyCount": 0,
+      "indexedAt": "2026-10-03T01:05:01.000Z"
+    },
+    {
+      "uri": "at://did:plc:fixtureunlabelled000000/app.bsky.feed.post/3mwunlabel01",
+      "cid": "bafyreifixtureunlabelledpost000000000000000000000000000001",
+      "author": {
+        "did": "did:plc:fixtureunlabelled000000",
+        "handle": "unlabelled.example.com",
+        "displayName": "Fixture Unlabelled",
+        "labels": []
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "fixture: adult-sounding caption that the platform did NOT label (pilot 2026-10-03 shape)",
+        "createdAt": "2026-10-03T00:49:45Z"
+      },
+      "embed": {
+        "$type": "app.bsky.embed.video#view",
+        "cid": "bafkreifixturevideounlabel0000000000000000000000000000001",
+        "thumbnail": "https://video.bsky.app/watch/did%3Aplc%3Afixtureunlabelled000000/bafkreifixturevideounlabel0000000000000000000000000000001/thumbnail.jpg"
+      },
+      "labels": [],
+      "likeCount": 0,
+      "replyCount": 0,
+      "repostCount": 0,
+      "quoteCount": 0,
+      "indexedAt": "2026-10-03T00:49:47.259Z"
+    },
+    {
+      "uri": "at://did:plc:fixturelabellink0000000/app.bsky.feed.post/3mwlabellink1",
+      "cid": "bafyreifixturelabellinkpost00000000000000000000000000000001",
+      "author": {
+        "did": "did:plc:fixturelabellink0000000",
+        "handle": "labelled-link.example.com",
+        "labels": []
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "fixture: labelled post that links a YouTube video",
+        "createdAt": "2026-10-03T01:00:00.000Z"
+      },
+      "embed": {
+        "$type": "app.bsky.embed.external#view",
+        "external": {
+          "uri": "https://www.youtube.com/watch?v=fixtureLbl1",
+          "title": "Fixture linked video"
+        }
+      },
+      "labels": [
+        {
+          "src": "did:plc:ar7c4by46qjdydhdevvrndac",
+          "uri": "at://did:plc:fixturelabellink0000000/app.bsky.feed.post/3mwlabellink1",
+          "cid": "bafyreifixturelabellinkpost00000000000000000000000000000001",
+          "val": "porn",
+          "cts": "2026-10-03T01:00:05.000Z",
+          "ver": 1
+        }
+      ],
+      "likeCount": 0,
+      "replyCount": 0,
+      "indexedAt": "2026-10-03T01:00:01.000Z"
+    }
+  ]
+}

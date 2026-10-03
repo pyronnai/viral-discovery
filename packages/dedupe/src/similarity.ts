@@ -10,6 +10,9 @@
  * False merges are worse than missed merges, so:
  *  - no single signal can produce a match (≥ 2 independent positive signals);
  *  - a clear duration mismatch vetoes a match outright;
+ *  - same-platform pairs without visual evidence need title evidence (or a shared
+ *    referencing post): one creator's clips often share a length (e.g. 60 s Twitch
+ *    clips), so creator + duration alone is not enough (live pilot, 2026-10-03);
  *  - auto-confirmation needs a very close thumbnail AND matching duration AND
  *    supporting metadata (title or creator), across platforms, with no
  *    conflicting numbers in the titles. Everything else waits for a human.
@@ -17,7 +20,7 @@
 import { hammingDistance, isHash } from './phash.ts';
 import { compareTokens, normalizeText, type TextTokens } from './tokens.ts';
 
-export const DETECTOR_VERSION = 'near-dup-v1';
+export const DETECTOR_VERSION = 'near-dup-v1.1';
 
 export const THRESHOLDS = {
   /** Hamming distance between 64-bit pHashes (random pairs average ~32). */
@@ -247,6 +250,13 @@ export function assessPair(a: MatchProfile, b: MatchProfile): DuplicateAssessmen
 
   const vetoes: string[] = [];
   if (duration.grade === 'different') vetoes.push('DURATION_MISMATCH');
+  if (
+    a.platform === b.platform &&
+    thumbnail.grade === 'unavailable' &&
+    !positiveSignals.includes('title') &&
+    references.shared === 0
+  )
+    vetoes.push('SAME_PLATFORM_WITHOUT_VISUAL_OR_TITLE_EVIDENCE');
   if (thumbnail.grade === 'different' && !positiveSignals.includes('duration'))
     vetoes.push('THUMBNAIL_DIFFERENT_WITHOUT_DURATION_MATCH');
 

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
   CAPABILITY_METHODS,
   QUERY_KIND_CAPABILITY,
@@ -64,6 +64,8 @@ export interface RunStats {
   filteredSamples: { externalId: string; platformVideoId: string; reason: string }[];
   invalidSamples: { externalId: string; errors: string[] }[];
   quotaUsed: Record<string, number>;
+  /** Authoritative lookups for videos this run only saw as references (other platforms). */
+  enrichment?: EnrichmentSummary;
 }
 
 export interface RunSummary {
@@ -148,6 +150,8 @@ async function runItems(
     request: Record<string, unknown>;
     filters: DiscoveryFilters;
     items: (ctx: AdapterContext) => AsyncIterable<RawItem>;
+    /** Look up references on their canonical platform after the run (default true). */
+    enrichReferences?: boolean;
   },
 ): Promise<RunSummary> {
   const { db, logger } = deps;
@@ -184,6 +188,7 @@ async function runItems(
     quotaUsed: {},
   };
   const videoIds: string[] = [];
+  const referenceIds = new Set<string>();
   const snapshotted = new Set<string>();
   let itemsFound = 0;
   let itemsNew = 0;
@@ -237,6 +242,7 @@ async function runItems(
       if (result.sighting) stats.sightingsCreated += 1;
       if (result.snapshot) stats.snapshotsCreated += 1;
       if (!videoIds.includes(result.videoId)) videoIds.push(result.videoId);
+      if (isReference(adapter, video)) referenceIds.add(result.videoId);
     }
   } catch (err) {
     error = errorMessage(err);
@@ -245,7 +251,18 @@ async function runItems(
   }
 
   stats.quotaUsed = { ...quota.usage() };
-  await recordApiUsage(db, source.id, usageDate(now()), stats.quotaUsed);
+  await recordApiUsage(db, source.id, usageDate(now()), stats.quotaUsed, quota.requests());
+  if (referenceIds.size > 0 && args.enrichReferences !== false) {
+    // Enrichment problems never fail the discovery run; they are counted on it.
+    try {
+      stats.enrichment = await enrichReferences(deps, {
+        videoIds: [...referenceIds],
+        limit: MAX_ENRICHMENTS_PER_RUN,
+      });
+    } catch (err) {
+      logger.error({ err, runId: run.id }, 'reference enrichment failed');
+    }
+  }
   await db
     .update(schema.discoveryRuns)
     .set({ status, finishedAt: now(), itemsFound, itemsNew, error, stats: { ...stats } })
@@ -275,6 +292,8 @@ export interface DiscoverOptions {
   sourceName?: string;
   sourceQueryId?: string | null;
   trigger?: DiscoveryRunTrigger;
+  /** Look up videos seen only as references on their canonical platform (default true). */
+  enrichReferences?: boolean;
 }
 
 export function getAdapter(registry: AdapterRegistry, adapterId: string): SourceAdapter {
@@ -325,6 +344,9 @@ export async function runDiscovery(
     request: { adapterId: adapter.manifest.id, ...request, filters: options.filters ?? {} },
     filters: options.filters ?? {},
     items: (ctx) => discover(request, ctx),
+    ...(options.enrichReferences === undefined
+      ? {}
+      : { enrichReferences: options.enrichReferences }),
   });
 }
 
@@ -351,6 +373,136 @@ export async function runSourceQuery(
     ...(options.filters ? { filters: options.filters } : {}),
     trigger: options.trigger ?? 'manual',
   });
+}
+
+export type EnrichmentResult =
+  | { status: 'enriched'; adapterId: string; snapshot: boolean }
+  | { status: 'not_found'; adapterId: string; message: string }
+  | { status: 'failed'; adapterId: string; message: string }
+  | { status: 'no_adapter'; message: string };
+
+export interface EnrichmentSummary {
+  considered: number;
+  enriched: number;
+  notFound: number;
+  failed: number;
+  /** References to platforms without a configured authoritative adapter (left as they are). */
+  noAdapter: number;
+  results: ({ videoId: string; platform: string } & EnrichmentResult)[];
+}
+
+/** Bounds authoritative lookups (each is a metered API call) triggered by one discovery run. */
+export const MAX_ENRICHMENTS_PER_RUN = 50;
+
+/** A configured adapter for the video's own platform that can look up a single URL. */
+export function canonicalAdapter(
+  registry: AdapterRegistry,
+  platform: string,
+): SourceAdapter | undefined {
+  return registry
+    .list()
+    .find(
+      (a) => a.manifest.platform === platform && a.manifest.capabilities.includes('discovery.url'),
+    );
+}
+
+/**
+ * reference → canonical identity → authoritative adapter for that platform →
+ * lookup → merge. The lookup is ingested as an AUTHORITATIVE observation, so its
+ * non-null fields win over reference data, while the reference's sighting stays
+ * untouched (the lookup itself writes no sighting).
+ */
+export async function enrichFromCanonical(
+  deps: PipelineDeps,
+  video: { id: string; platform: string; canonicalUrl: string },
+): Promise<EnrichmentResult> {
+  const { platform } = video;
+  const adapter = canonicalAdapter(deps.registry, platform);
+  if (!adapter?.lookupUrl) {
+    return {
+      status: 'no_adapter',
+      message: `no configured ${platform} adapter; stored identity and whatever the discovering source provides`,
+    };
+  }
+  const adapterId = adapter.manifest.id;
+  const now = deps.now ?? (() => new Date());
+  const source = await ensureSource(deps.db, adapter.manifest);
+  const quota = await loadQuotaBudget(deps.db, source, now(), adapter.manifest);
+  try {
+    const raw = await adapter.lookupUrl(video.canonicalUrl, adapterContext(deps, adapter, quota));
+    if (!raw) {
+      return {
+        status: 'not_found',
+        adapterId,
+        message: `${platform} did not return this video (removed, private, or wrong id)`,
+      };
+    }
+    const normalized = safeNormalize(adapter, raw);
+    if (!normalized.ok) {
+      return { status: 'failed', adapterId, message: normalized.errors.join('; ') };
+    }
+    const result = await ingestOne(deps.db, {
+      adapter,
+      source,
+      runId: null,
+      raw,
+      video: normalized.value,
+      writeSighting: false,
+      writeSnapshot: true,
+    });
+    if (result.videoId !== video.id) {
+      return {
+        status: 'failed',
+        adapterId,
+        message: 'canonical lookup resolved to a different video',
+      };
+    }
+    return { status: 'enriched', adapterId, snapshot: result.snapshot };
+  } catch (err) {
+    return { status: 'failed', adapterId, message: errorMessage(err) };
+  } finally {
+    await recordApiUsage(deps.db, source.id, usageDate(now()), quota.usage(), quota.requests());
+  }
+}
+
+/**
+ * Enriches videos that so far were only seen as references (no authoritative
+ * observation yet) from their canonical platform's adapter, when one is
+ * configured. Videos of platforms without one keep their reference data.
+ */
+export async function enrichReferences(
+  deps: PipelineDeps,
+  options: { videoIds?: string[]; limit: number },
+): Promise<EnrichmentSummary> {
+  const { videos } = schema;
+  const conditions = [isNull(videos.rawPayloadFetchedAt)];
+  if (options.videoIds) {
+    if (options.videoIds.length === 0) conditions.push(isNull(videos.id));
+    else conditions.push(inArray(videos.id, options.videoIds));
+  }
+  const candidates = await deps.db
+    .select({ id: videos.id, platform: videos.platform, canonicalUrl: videos.canonicalUrl })
+    .from(videos)
+    .where(and(...conditions))
+    .orderBy(videos.firstDiscoveredAt, videos.id)
+    .limit(options.limit);
+  const summary: EnrichmentSummary = {
+    considered: candidates.length,
+    enriched: 0,
+    notFound: 0,
+    failed: 0,
+    noAdapter: 0,
+    results: [],
+  };
+  for (const video of candidates) {
+    const result = await enrichFromCanonical(deps, video);
+    summary.results.push({ videoId: video.id, platform: video.platform, ...result });
+    if (result.status === 'enriched') summary.enriched += 1;
+    else if (result.status === 'not_found') summary.notFound += 1;
+    else if (result.status === 'failed') summary.failed += 1;
+    else summary.noAdapter += 1;
+  }
+  return summary;
 }
 
 export { runItems, ingestOne };

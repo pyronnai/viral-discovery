@@ -44,6 +44,7 @@ pnpm cli discover twitch --kind channel_feed --param broadcasterId=12345
 pnpm cli discover --query <source_queries.id>        # run a stored SourceQuery
 pnpm cli submit-url 'https://www.tiktok.com/@user/video/7412345678901234567'
 pnpm cli refresh-metrics youtube --limit 200         # append metric snapshots
+pnpm cli enrich-references --limit 25                # look up reference-only videos on their own platform
 ```
 
 ## Scheduled discovery, refresh ladder, and scoring

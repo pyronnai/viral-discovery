@@ -178,6 +178,79 @@ describe('assessPair', () => {
     expect(r.decision).toBe('no_match');
   });
 
+  describe('same platform without visual evidence (live pilot, 2026-10-03)', () => {
+    const twitchClip = (videoId: string, title: string, at: string) =>
+      profile({
+        videoId,
+        platform: 'twitch',
+        phash: null,
+        durationMs: 60_000,
+        publishedAt: new Date(at),
+        creatorKeys: creatorKeys('fixturestreamer'),
+        title,
+      });
+
+    it('A: same creator + both 60 s + unrelated titles + no thumbnails → not suggested', () => {
+      const r = assessPair(
+        twitchClip('a', 'равшан про бустера', '2026-10-02T20:00:00Z'),
+        twitchClip('b', '010 ЛЫСЫЙ РАВШАН БРЕЕТ', '2026-10-02T22:12:00Z'),
+      );
+      // Exactly the live evidence: duration match + same creator + close publication = 40.
+      expect(r.positiveSignals).toEqual(['duration', 'creator']);
+      expect(r.score).toBe(40);
+      expect(r.decision).toBe('no_match');
+      expect(r.vetoes).toEqual(['SAME_PLATFORM_WITHOUT_VISUAL_OR_TITLE_EVIDENCE']);
+      // Untitled clips (")") are no different.
+      expect(
+        assessPair(
+          twitchClip('a', ')', '2026-10-02T20:00:00Z'),
+          twitchClip('b', '010 ЛЫСЫЙ РАВШАН БРЕЕТ', '2026-10-02T22:30:00Z'),
+        ).decision,
+      ).toBe('no_match');
+    });
+
+    it('B: same creator + same duration + strongly matching distinctive titles → still possible', () => {
+      const r = assessPair(
+        twitchClip('a', 'streamer falls off the gaming chair mid raid', '2026-10-02T20:00:00Z'),
+        twitchClip('b', 'Streamer FALLS off gaming chair mid-raid', '2026-10-02T20:40:00Z'),
+      );
+      expect(r.evidence.title.grade).toBe('strong');
+      expect(r.decision).toBe('possible');
+      expect(r.autoBlockers).toEqual(
+        expect.arrayContaining(['NO_THUMBNAIL_HASH', 'SAME_PLATFORM']),
+      );
+    });
+
+    it('a shared referencing post still counts as independent evidence', () => {
+      const r = assessPair(
+        { ...twitchClip('a', 'one', '2026-10-02T20:00:00Z'), references: ['at://post/1'] },
+        { ...twitchClip('b', 'two', '2026-10-02T20:30:00Z'), references: ['at://post/1'] },
+      );
+      expect(r.vetoes).toEqual([]);
+      expect(r.decision).toBe('possible');
+    });
+
+    it('C: a strong cross-platform visual match is unchanged', () => {
+      const r = assessPair(
+        profile({}),
+        profile({
+          videoId: 'b',
+          platform: 'twitch',
+          phash: catHashRepost,
+          durationMs: 42_400,
+          title: 'cat DISCOVERS vacuum cleaner lol',
+        }),
+      );
+      expect(r.decision).toBe('auto_confirm');
+      // Cross-platform without thumbnails is not affected by the same-platform rule either.
+      const noVisual = assessPair(
+        profile({ phash: null, title: 'abc' }),
+        profile({ videoId: 'b', platform: 'tiktok', phash: null, title: 'xyz' }),
+      );
+      expect(noVisual.vetoes).toEqual([]);
+    });
+  });
+
   it('one strong signal alone is never enough', () => {
     const thumbOnly = assessPair(
       profile({ durationMs: null, title: 'abc', creatorKeys: [] }),
@@ -360,6 +433,75 @@ describe('thumbnail fetch security', () => {
       await fetchThumbnail('https://i.ytimg.com/x.jpg', { transport: slow, policy }),
     ).toMatchObject({ status: 'timeout' });
     expect(seen[0]?.username).toBe('');
+  });
+
+  describe('generic binary content-type (live: Bluesky video CDN, 2026-10-03)', () => {
+    const BSKY = 'https://video.bsky.app/watch/did%3Aplc%3Afixture/bafkreifixture/thumbnail.jpg';
+    const CDN = 'https://video.cdn.bsky.app/hls/did:plc:fixture/bafkreifixture/thumbnail.jpg';
+    // The observed chain: 302 to the CDN, then 200 application/octet-stream.
+    const bluesky =
+      (body: Uint8Array, contentType = 'application/octet-stream'): HopTransport =>
+      (url) =>
+        Promise.resolve(
+          url.hostname === 'video.bsky.app'
+            ? response({ status: 302, location: CDN })
+            : response({ contentType, chunks: [body] }),
+        );
+
+    it('accepts real JPEG bytes from the allowlisted Bluesky CDN', async () => {
+      const jpeg = toJpeg(syntheticImage(5, 64, 64));
+      const r = await fetchThumbnail(BSKY, { transport: bluesky(jpeg) });
+      expect(r).toMatchObject({ ok: true, contentType: 'image/jpeg', finalUrl: CDN });
+    });
+
+    it('still requires the bytes to be a supported image', async () => {
+      const html = new TextEncoder().encode('<html>not an image</html>');
+      expect(await fetchThumbnail(BSKY, { transport: bluesky(html) })).toMatchObject({
+        ok: false,
+        status: 'not_an_image',
+      });
+      const gif = new TextEncoder().encode('GIF89a....');
+      expect(await fetchThumbnail(BSKY, { transport: bluesky(gif) })).toMatchObject({
+        ok: false,
+        status: 'unsupported_format',
+      });
+    });
+
+    it('does not accept application/octet-stream from other hosts, even allowlisted ones', async () => {
+      const jpeg = toJpeg(syntheticImage(5, 64, 64));
+      const ytOctet: HopTransport = () =>
+        Promise.resolve(response({ contentType: 'application/octet-stream', chunks: [jpeg] }));
+      expect(
+        await fetchThumbnail('https://i.ytimg.com/x.jpg', { transport: ytOctet }),
+      ).toMatchObject({ ok: false, status: 'not_an_image' });
+      // cdn.bsky.app (avatars etc.) is allowlisted but not a generic-binary host.
+      expect(
+        await fetchThumbnail('https://cdn.bsky.app/img/x.jpg', { transport: ytOctet }),
+      ).toMatchObject({ ok: false, status: 'not_an_image' });
+    });
+
+    it('keeps size limits and redirect validation for the exempt host', async () => {
+      const big: HopTransport = (url) =>
+        Promise.resolve(
+          url.hostname === 'video.bsky.app'
+            ? response({ status: 302, location: CDN })
+            : response({
+                contentType: 'application/octet-stream',
+                chunks: Array.from({ length: 30 }, () => new Uint8Array(100_000)),
+              }),
+        );
+      expect(await fetchThumbnail(BSKY, { transport: big })).toMatchObject({ status: 'too_large' });
+      const toPrivate: HopTransport = () =>
+        Promise.resolve(response({ status: 302, location: 'https://10.0.0.1/thumbnail.jpg' }));
+      expect(await fetchThumbnail(BSKY, { transport: toPrivate })).toMatchObject({
+        status: 'rejected_url',
+      });
+      const httpCdn: HopTransport = () =>
+        Promise.resolve(response({ status: 302, location: CDN.replace('https://', 'http://') }));
+      expect(await fetchThumbnail(BSKY, { transport: httpCdn })).toMatchObject({
+        status: 'rejected_url',
+      });
+    });
   });
 
   it('returns bytes for a valid image response', async () => {

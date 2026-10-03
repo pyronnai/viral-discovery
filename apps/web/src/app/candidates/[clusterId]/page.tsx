@@ -17,6 +17,7 @@ import {
   versionViews,
 } from '@vd/review';
 import { ClassifyButton } from '../../../components/ClassifyButton.tsx';
+import { SourceModerationWarning } from '../../../components/SourceModeration.tsx';
 import {
   ConflictBanner,
   PossibleDuplicates,
@@ -325,6 +326,11 @@ export default async function CandidatePage({
             </tbody>
           </table>
         )}
+      </section>
+
+      <section>
+        <h2>Platform moderation labels</h2>
+        <SourceModerationWarning moderation={card.sourceModeration} />
       </section>
 
       <section>

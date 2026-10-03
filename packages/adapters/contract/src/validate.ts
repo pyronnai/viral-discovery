@@ -95,6 +95,12 @@ export function safeNormalize(adapter: SourceAdapter, raw: RawItem): NormalizeRe
     if (value.metrics) {
       errors.push(`a reference to a "${value.platform}" video must not carry metrics`);
     }
+    // Labels on a referencing post describe that post, not the linked video.
+    if (value.moderationLabels?.length) {
+      errors.push(
+        `a reference to a "${value.platform}" video must not carry source moderation labels`,
+      );
+    }
   } else if (value.metrics) {
     errors.push(...undeclaredMetricErrors(adapter, value.metrics));
   }

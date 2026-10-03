@@ -1,0 +1,1 @@
+ALTER TABLE "videos" ADD COLUMN "source_moderation_labels" jsonb;

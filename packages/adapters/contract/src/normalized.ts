@@ -37,6 +37,31 @@ export const NormalizedCreatorSchema = z.object({
 export type NormalizedCreator = z.infer<typeof NormalizedCreatorSchema>;
 
 /**
+ * A moderation label the SOURCE PLATFORM attached to the item (e.g. an AT Protocol
+ * label). Kept verbatim and separate from AI content analysis: `value` is exactly
+ * what the platform reported; `explicit` is the adapter's reading of that platform's
+ * own label semantics (adult or graphic content), never a guess from the content.
+ */
+export const SourceModerationLabelSchema = z.object({
+  value: z.string().min(1),
+  /** Who applied it (labeler / moderation service id), if the platform says. */
+  labeler: z.string().min(1).nullable(),
+  /** "content" = this item; "account" = applies to everything the creator posts. */
+  scope: z.enum(['content', 'account']),
+  /** Applied by the author themselves (self-label / content warning). */
+  selfApplied: z.boolean(),
+  /** The platform defines this label as explicit adult or graphic content. */
+  explicit: z.boolean(),
+});
+export type SourceModerationLabel = z.infer<typeof SourceModerationLabelSchema>;
+
+/**
+ * null/absent = this source does not report moderation labels (unknown);
+ * [] = the source reported none at observation time.
+ */
+const ModerationLabelsSchema = z.array(SourceModerationLabelSchema).nullable().optional();
+
+/**
  * The single normalized shape every adapter must produce. Core never sees
  * platform-specific payloads. Unknown values are explicit nulls, never guesses.
  */
@@ -55,6 +80,8 @@ export const NormalizedVideoSchema = z.object({
   availability: VideoAvailabilitySchema.default('available'),
   /** Metrics observed together with the item, if any. null = none observed this time. */
   metrics: MetricReadingsSchema.nullable(),
+  /** Source-platform moderation labels of the item (authoritative observations only). */
+  moderationLabels: ModerationLabelsSchema,
   observedAt: z.date(),
 });
 export type NormalizedVideo = z.infer<typeof NormalizedVideoSchema>;
@@ -64,6 +91,8 @@ export const MetricRefreshResultSchema = z.object({
   platformVideoId: z.string().min(1),
   availability: VideoAvailabilitySchema,
   metrics: MetricReadingsSchema.nullable(),
+  /** Labels can be applied after first discovery; a refresh may report the current set. */
+  moderationLabels: ModerationLabelsSchema,
   observedAt: z.date(),
 });
 export type MetricRefreshResult = z.infer<typeof MetricRefreshResultSchema>;

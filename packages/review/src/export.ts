@@ -22,6 +22,8 @@ export interface ExportRow {
   viralityScore: number | null;
   scoreState: string;
   labels: string[];
+  /** Moderation labels reported by the source platform (not AI), e.g. "bluesky:porn". */
+  platformLabels: string[];
   durationSeconds: number | null;
   publishedAt: string | null;
   views: number | null;
@@ -51,6 +53,7 @@ export function toExportRow(r: FeedRow): ExportRow {
     viralityScore: r.score === null ? null : Math.round(r.score * 10) / 10,
     scoreState: r.scoreState ?? 'unscored',
     labels: (r.labels ?? []).map((l) => l.label),
+    platformLabels: [...new Set(r.sourceModeration.map((l) => `${l.platform}:${l.value}`))].sort(),
     durationSeconds: r.durationMs === null ? null : Math.round(r.durationMs / 1000),
     publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
     views: r.views,
@@ -122,6 +125,7 @@ const CSV_COLUMNS: [string, (r: ExportRow) => string | number | boolean | null][
   ['virality_score', (r) => r.viralityScore],
   ['score_state', (r) => r.scoreState],
   ['labels', (r) => r.labels.join(', ')],
+  ['platform_labels', (r) => r.platformLabels.join(', ')],
   ['duration_seconds', (r) => r.durationSeconds],
   ['published_at', (r) => r.publishedAt],
   ['views', (r) => r.views],

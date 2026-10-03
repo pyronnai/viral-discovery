@@ -89,6 +89,8 @@ export async function upsertVideo(
       language: video.language,
       contentOrigin: video.contentOrigin,
       availability: video.availability,
+      // Platform moderation describes the canonical item; a reference never sets it.
+      sourceModerationLabels: authoritative ? (video.moderationLabels ?? null) : null,
       // Raw payloads are kept only from the canonical platform (retention-sensitive).
       rawPayload: authoritative ? raw.payload : null,
       rawPayloadFetchedAt: authoritative ? raw.fetchedAt : null,
@@ -113,6 +115,8 @@ export async function upsertVideo(
         availability: authoritative
           ? sql.raw(`excluded."availability"`)
           : sql`CASE WHEN ${videos.availability} = 'unknown' THEN excluded."availability" ELSE ${videos.availability} END`,
+        // A reported label set (even empty) replaces the old one: labels can be retracted.
+        sourceModerationLabels: keep(videos.sourceModerationLabels),
         rawPayload: keep(videos.rawPayload),
         rawPayloadFetchedAt: keep(videos.rawPayloadFetchedAt),
         firstDiscoveredAt: sql`least(${videos.firstDiscoveredAt}, excluded."first_discovered_at")`,
@@ -210,21 +214,28 @@ export async function insertSnapshot(
   return rows.length > 0;
 }
 
-/** Adds this run's per-bucket usage to today's api_usage rows. */
+/** Adds this run's per-bucket usage (units and metered requests) to today's api_usage rows. */
 export async function recordApiUsage(
   db: Executor,
   sourceId: string,
   usageDate: string,
   usage: Readonly<Record<string, number>>,
+  requests: Readonly<Record<string, number>> = {},
 ): Promise<void> {
-  for (const [bucket, units] of Object.entries(usage)) {
-    if (units <= 0) continue;
+  for (const bucket of new Set([...Object.keys(usage), ...Object.keys(requests)])) {
+    const units = usage[bucket] ?? 0;
+    const count = requests[bucket] ?? 0;
+    if (units <= 0 && count <= 0) continue;
     await db
       .insert(apiUsage)
-      .values({ sourceId, usageDate, quotaBucket: bucket, unitsUsed: units })
+      .values({ sourceId, usageDate, quotaBucket: bucket, unitsUsed: units, requestCount: count })
       .onConflictDoUpdate({
         target: [apiUsage.sourceId, apiUsage.usageDate, apiUsage.quotaBucket],
-        set: { unitsUsed: sql`${apiUsage.unitsUsed} + ${units}`, updatedAt: sql`now()` },
+        set: {
+          unitsUsed: sql`${apiUsage.unitsUsed} + ${units}`,
+          requestCount: sql`${apiUsage.requestCount} + ${count}`,
+          updatedAt: sql`now()`,
+        },
       });
   }
 }

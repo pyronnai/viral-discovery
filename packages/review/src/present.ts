@@ -158,6 +158,18 @@ export interface CardView {
   classification: ClassificationState;
   aiSummary: string | null;
   flags: { flag: string; significant: boolean; note: string }[];
+  /** SOURCE MODERATION: labels the platform attached (kept apart from AI analysis). */
+  sourceModeration: {
+    explicit: boolean;
+    /** e.g. "porn, sexual (Bluesky moderation)" — empty when nothing was reported. */
+    labels: {
+      value: string;
+      platform: string;
+      explicit: boolean;
+      by: string;
+      labeler: string | null;
+    }[];
+  };
   publicPropagation: SourceCount[];
   provenance: SourceCount[];
   versions: number;
@@ -244,6 +256,24 @@ export function toCardView(row: FeedRow, roles: SightingRoles, now: Date): CardV
       note: f.note,
       significant: (SIGNIFICANT_FLAGS as readonly string[]).includes(f.flag as SafetyFlag),
     })),
+    sourceModeration: {
+      explicit: row.sourceExplicit,
+      labels: [...row.sourceModeration]
+        .sort((a, b) => Number(b.explicit) - Number(a.explicit) || a.value.localeCompare(b.value))
+        .map((l) => ({
+          value: l.value,
+          platform: platformName(l.platform),
+          explicit: l.explicit,
+          by: l.selfApplied
+            ? l.scope === 'account'
+              ? 'creator’s own account label'
+              : 'creator’s own content warning'
+            : l.scope === 'account'
+              ? `${platformName(l.platform)} moderation (account)`
+              : `${platformName(l.platform)} moderation`,
+          labeler: l.labeler,
+        })),
+    },
     publicPropagation,
     provenance,
     versions: row.versions,

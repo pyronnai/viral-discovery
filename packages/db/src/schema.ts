@@ -211,6 +211,20 @@ export const videos = pgTable(
     language: text('language'),
     contentOrigin: contentOriginEnum('content_origin').notNull().default('discovered_external'),
     availability: videoAvailabilityEnum('availability').notNull().default('available'),
+    /**
+     * Moderation labels the SOURCE PLATFORM reported for this item (verbatim value,
+     * labeler, scope, self-applied, and whether the platform defines it as explicit).
+     * Separate from AI content analysis. NULL = the platform reports none / unknown.
+     */
+    sourceModerationLabels: jsonb('source_moderation_labels').$type<
+      {
+        value: string;
+        labeler: string | null;
+        scope: 'content' | 'account';
+        selfApplied: boolean;
+        explicit: boolean;
+      }[]
+    >(),
     clusterId: uuid('cluster_id').references((): AnyPgColumn => clusters.id, {
       onDelete: 'set null',
     }),

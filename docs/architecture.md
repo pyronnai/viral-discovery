@@ -112,8 +112,23 @@ observation_key)`. `observation_key` defaults to the raw item's external id; ada
   `metrics.refresh` on all stored videos of that platform (least recently refreshed first),
   including videos first seen through other sources. Velocity = difference between snapshots
   (computed in the scoring phase, not now).
-- **Enrichment:** `submit-url` records the submission as a `manual-url` reference, then, if
-  the canonical platform's adapter is configured, fetches authoritative data (no extra sighting).
+- **Enrichment:** a video seen only as a **reference** (a Bluesky post linking YouTube, a
+  `submit-url` submission) is looked up on its canonical platform by that platform's adapter
+  (`discovery.url`), if configured: reference → canonical identity → authoritative adapter →
+  lookup → merge. The lookup is an authoritative observation (its non-null fields win; reference
+  data only ever fills gaps), writes no sighting (the reference's sighting stays), may add a
+  canonical metric snapshot, and is metered on that adapter's own quota. Discovery runs do this
+  for references they touched that were never observed authoritatively (≤ 50 per run, counted in
+  `stats.enrichment`); `enrich-references` backfills older rows. Without a configured adapter the
+  reference keeps its reference data. `api_usage` records units **and** metered requests per bucket.
+- **Source moderation ≠ AI analysis:** adapters may report the platform's own moderation labels
+  (`videos.source_moderation_labels`: verbatim value, labeler, content/account scope,
+  self-applied, and whether the platform defines it as explicit adult/graphic content). Bluesky:
+  post labels, record self-labels and account labels (not profile-record labels; negated and
+  expired labels dropped); explicit = `porn`, `sexual`, `nudity`, `graphic-media`. Labels are
+  refreshed with metrics (labelers often act after first discovery); references never carry
+  them. Explicitly labelled clusters are excluded from Viral Now, kept in All/Flagged and shown
+  with a warning. Unlabelled content is never guessed at — that needs the AI classifier.
 
 ## Adapter contract
 
@@ -554,7 +569,10 @@ review/rights history. Everything else waits for a human. Confidence = points/10
 histories; a missed merge costs one extra card a human can still link. So one strong signal is
 never enough, a duration mismatch vetoes, TikTok pairs (no duration from oEmbed) can never
 auto-merge, same-platform pairs (re-uploads, series episodes) always get a human look, and a
-missing signal never counts as evidence of difference.
+missing signal never counts as evidence of difference. Since `near-dup-v1.1`, a
+**same-platform pair without a thumbnail comparison** also needs title evidence (moderate+) or a
+shared referencing post: one creator's clips often share a length (60 s Twitch clips), so
+creator + duration alone is vetoed (`SAME_PLATFORM_WITHOUT_VISUAL_OR_TITLE_EVIDENCE`).
 
 ### Candidate generation (bounded, no all-pairs)
 
@@ -579,7 +597,9 @@ DNS answers are checked **at connect time** (custom `lookup`) and refused unless
 globally routable (no loopback/private/link-local/CGNAT/metadata/ULA/mapped-private), which also
 closes DNS rebinding; redirects followed manually (max 3), each hop re-validated; no cookies or
 credential headers, fresh connection per request; 2 MB cap (declared and streamed); `image/jpeg`
-or `image/png` content type plus magic-byte sniffing; 6 s overall timeout; decode capped at 12 MP.
+or `image/png` content type plus magic-byte sniffing (only `video.cdn.bsky.app`, which serves real
+JPEG thumbnails as `application/octet-stream`, may send that generic type — its bytes must then
+sniff as JPEG/PNG); 6 s overall timeout; decode capped at 12 MP.
 Failures become a stored status (`host_not_allowed`, `too_large`, `decode_failed`, …) and
 detection continues without the thumbnail; terminal failures are remembered per URL, transient
 ones (`timeout`, `http_error`, `fetch_failed`) are retried by a later scan. Source video media is

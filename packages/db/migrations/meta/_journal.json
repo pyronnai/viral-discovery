@@ -50,6 +50,13 @@
       "when": 1790814659597,
       "tag": "0006_viral_inbox",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790992399125,
+      "tag": "0007_source_moderation_labels",
+      "breakpoints": true
     }
   ]
 }

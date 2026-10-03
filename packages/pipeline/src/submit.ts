@@ -1,16 +1,15 @@
 import { eq } from 'drizzle-orm';
-import { safeNormalize, type SourceAdapter } from '@vd/adapter-contract';
+import type { SourceAdapter } from '@vd/adapter-contract';
 import { schema } from '@vd/db';
 import { resolveVideoUrl, type UrlRejectionReason } from '@vd/url-identity';
 import {
-  adapterContext,
-  ingestOne,
+  enrichFromCanonical,
   runItems,
+  type EnrichmentResult,
   type PipelineDeps,
   type RunSummary,
 } from './ingest.ts';
-import { recordApiUsage } from './persist.ts';
-import { PipelineError, ensureSource, loadQuotaBudget, usageDate } from './sources.ts';
+import { PipelineError, ensureSource } from './sources.ts';
 
 export class UnsupportedUrlError extends PipelineError {
   readonly reason: UrlRejectionReason;
@@ -20,12 +19,6 @@ export class UnsupportedUrlError extends PipelineError {
     this.reason = reason;
   }
 }
-
-export type EnrichmentResult =
-  | { status: 'enriched'; adapterId: string; snapshot: boolean }
-  | { status: 'not_found'; adapterId: string; message: string }
-  | { status: 'failed'; adapterId: string; message: string }
-  | { status: 'no_adapter'; message: string };
 
 export interface SubmitResult {
   run: RunSummary;
@@ -48,15 +41,6 @@ function submissionAdapter(deps: PipelineDeps, platform: string): SourceAdapter 
       (a) =>
         a.manifest.capabilities.includes('discovery.url') &&
         a.manifest.referencePlatforms.includes(platform),
-    );
-}
-
-/** A configured adapter for the video's own platform that can look up a single URL. */
-function canonicalAdapter(deps: PipelineDeps, platform: string): SourceAdapter | undefined {
-  return deps.registry
-    .list()
-    .find(
-      (a) => a.manifest.platform === platform && a.manifest.capabilities.includes('discovery.url'),
     );
 }
 
@@ -88,6 +72,8 @@ export async function submitUrl(deps: PipelineDeps, url: string): Promise<Submit
     sourceQueryId: null,
     request: { adapterId: recorder.manifest.id, kind: 'url', url },
     filters: {},
+    // The submission is enriched explicitly below, so its result can be reported.
+    enrichReferences: false,
     items: async function* (ctx) {
       const raw = await lookup(url, ctx);
       if (raw) yield raw;
@@ -105,7 +91,7 @@ export async function submitUrl(deps: PipelineDeps, url: string): Promise<Submit
     .from(schema.videos)
     .where(eq(schema.videos.id, videoId));
   if (!stored) throw new PipelineError('submitted video vanished');
-  const enrichment = await enrich(deps, stored.platform, stored.canonicalUrl, videoId);
+  const enrichment = await enrichFromCanonical(deps, { id: videoId, ...stored });
 
   const [video] = await deps.db
     .select({
@@ -120,62 +106,4 @@ export async function submitUrl(deps: PipelineDeps, url: string): Promise<Submit
     .where(eq(schema.videos.id, videoId));
   if (!video) throw new PipelineError('submitted video vanished');
   return { run, video, enrichment };
-}
-
-async function enrich(
-  deps: PipelineDeps,
-  platform: string,
-  url: string,
-  expectedVideoId: string,
-): Promise<EnrichmentResult> {
-  const adapter = canonicalAdapter(deps, platform);
-  if (!adapter?.lookupUrl) {
-    return {
-      status: 'no_adapter',
-      message: `no configured ${platform} adapter; stored identity and whatever the submission source provides`,
-    };
-  }
-  const adapterId = adapter.manifest.id;
-  const now = deps.now ?? (() => new Date());
-  const source = await ensureSource(deps.db, adapter.manifest);
-  const quota = await loadQuotaBudget(deps.db, source, now(), adapter.manifest);
-  try {
-    const raw = await adapter.lookupUrl(url, adapterContext(deps, adapter, quota));
-    if (!raw) {
-      return {
-        status: 'not_found',
-        adapterId,
-        message: `${platform} did not return this video (removed, private, or wrong id)`,
-      };
-    }
-    const normalized = safeNormalize(adapter, raw);
-    if (!normalized.ok) {
-      return { status: 'failed', adapterId, message: normalized.errors.join('; ') };
-    }
-    const result = await ingestOne(deps.db, {
-      adapter,
-      source,
-      runId: null,
-      raw,
-      video: normalized.value,
-      writeSighting: false,
-      writeSnapshot: true,
-    });
-    if (result.videoId !== expectedVideoId) {
-      return {
-        status: 'failed',
-        adapterId,
-        message: 'canonical lookup resolved to a different video',
-      };
-    }
-    return { status: 'enriched', adapterId, snapshot: result.snapshot };
-  } catch (err) {
-    return {
-      status: 'failed',
-      adapterId,
-      message: err instanceof Error ? err.message : String(err),
-    };
-  } finally {
-    await recordApiUsage(deps.db, source.id, usageDate(now()), quota.usage());
-  }
 }

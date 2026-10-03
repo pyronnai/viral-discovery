@@ -2,7 +2,12 @@ import type { Command } from 'commander';
 import { QUERY_KIND_CAPABILITY } from '@vd/adapter-contract';
 import { unconfiguredMessage } from '@vd/adapter-wiring';
 import { SourceQueryKindSchema, type SourceQueryKind } from '@vd/core';
-import { runDiscovery, runSourceQuery, type RunSummary } from '@vd/pipeline';
+import {
+  runDiscovery,
+  runSourceQuery,
+  type EnrichmentSummary,
+  type RunSummary,
+} from '@vd/pipeline';
 import type { CommandIO } from '../output.ts';
 import {
   CliError,
@@ -34,6 +39,16 @@ function defaultKind(runtime: CliRuntime, adapterId: string): SourceQueryKind {
   return kind;
 }
 
+export function printEnrichment(io: CommandIO, e: EnrichmentSummary, label: string): void {
+  io.out(
+    `${label}: ${e.enriched}/${e.considered} via canonical adapters · ${e.notFound} not found · ${e.failed} failed · ${e.noAdapter} without a configured adapter`,
+  );
+  for (const r of e.results
+    .filter((x) => x.status === 'failed' || x.status === 'not_found')
+    .slice(0, 5))
+    io.out(`  - ${r.platform} ${r.videoId}: ${r.status} (${'message' in r ? r.message : ''})`);
+}
+
 export function printRun(io: CommandIO, run: RunSummary): void {
   const ok = run.status === 'succeeded';
   const s = run.stats;
@@ -45,6 +60,7 @@ export function printRun(io: CommandIO, run: RunSummary): void {
   );
   const quota = Object.entries(s.quotaUsed).map(([b, n]) => `${b}=${n}`);
   if (quota.length) io.out(`  quota used: ${quota.join(', ')}`);
+  if (s.enrichment) printEnrichment(io, s.enrichment, '  references enriched');
   if (s.keptWithUnknownDuration)
     io.out(`  kept ${s.keptWithUnknownDuration} with unknown duration`);
   for (const f of s.filteredSamples.slice(0, 5))

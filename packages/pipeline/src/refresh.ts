@@ -113,6 +113,8 @@ export async function refreshMetrics(
           .set({
             availability: result.availability,
             ...(result.metrics ? { lastRefreshedAt: result.observedAt } : {}),
+            // Labelers often act after first discovery; a reported set replaces the stored one.
+            ...(result.moderationLabels ? { sourceModerationLabels: result.moderationLabels } : {}),
             updatedAt: sql`now()`,
           })
           .where(eq(schema.videos.id, videoId));
@@ -123,7 +125,7 @@ export async function refreshMetrics(
     deps.logger.error({ err, adapter: adapter.manifest.id }, 'metric refresh failed');
   } finally {
     summary.quotaUsed = { ...quota.usage() };
-    await recordApiUsage(deps.db, source.id, usageDate(now()), summary.quotaUsed);
+    await recordApiUsage(deps.db, source.id, usageDate(now()), summary.quotaUsed, quota.requests());
   }
   return summary;
 }

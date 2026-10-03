@@ -29,6 +29,15 @@ export interface Representation {
   mediaDownload: boolean;
 }
 
+export interface SourceModerationRow {
+  platform: string;
+  value: string;
+  labeler: string | null;
+  scope: 'content' | 'account';
+  selfApplied: boolean;
+  explicit: boolean;
+}
+
 export interface FeedRow {
   clusterId: string;
   videoId: string;
@@ -64,6 +73,10 @@ export interface FeedRow {
   platforms: string[];
   labels: { label: string; confidence: number }[] | null;
   safetyFlags: { flag: string; confidence: number; note: string }[] | null;
+  /** Moderation labels the source platforms reported for this cluster's videos (not AI). */
+  sourceModeration: SourceModerationRow[];
+  /** A platform labelled some version as explicit adult/graphic content. */
+  sourceExplicit: boolean;
   aiSummary: string | null;
   classifiedAt: Date | null;
   classificationFailure: string | null;
@@ -275,6 +288,8 @@ export function baseQuery(): SQL {
           and (va.cluster_id = c.id or vb.cluster_id = c.id)) as "possibleDuplicates",
       (select array_agg(distinct v4.platform) from videos v4 where v4.cluster_id = c.id) as platforms,
       cl.labels, cl.safety_flags as "safetyFlags", cl.rationale as "aiSummary", cl.created_at as "classifiedAt",
+      coalesce(sm.labels, '[]'::jsonb) as "sourceModeration",
+      coalesce(sm.explicit, false) as "sourceExplicit",
       cf.error_kind as "classificationFailure", cf.attempted_at as "classificationFailedAt",
       ms.views, ms.likes, ms.comments, ms.shares, ms.captured_at as "metricsAt",
       (select count(*)::int from videos v2 where v2.cluster_id = c.id) as versions,
@@ -338,6 +353,14 @@ export function baseQuery(): SQL {
       order by created_at desc limit 1
     ) cl on true
     left join lateral (
+      -- SOURCE MODERATION: labels the platforms themselves attached (never AI output).
+      select jsonb_agg(distinct (l.value || jsonb_build_object('platform', v7.platform))) as labels,
+        bool_or(coalesce((l.value->>'explicit')::boolean, false)) as explicit
+      from videos v7
+      cross join lateral jsonb_array_elements(coalesce(v7.source_moderation_labels, '[]'::jsonb)) l
+      where v7.cluster_id = c.id
+    ) sm on true
+    left join lateral (
       select error_kind, attempted_at from classification_failures
       where cluster_id = c.id and taxonomy_version = ${TAXONOMY_VERSION} and prompt_version = ${PROMPT_VERSION}
       order by attempted_at desc limit 1
@@ -361,6 +384,9 @@ export function baseQuery(): SQL {
     where c.merged_into_cluster_id is null`;
 }
 
+/** Needs a look before use: an AI review flag, or an explicit platform moderation label. */
+const FLAGGED = sql`(jsonb_array_length(coalesce(f."safetyFlags", '[]'::jsonb)) > 0 or f."sourceExplicit")`;
+
 function filterSql(filters: FeedFilters, now: Date): SQL[] {
   const where: SQL[] = [];
   if (filters.review === 'unreviewed')
@@ -382,8 +408,7 @@ function filterSql(filters: FeedFilters, now: Date): SQL[] {
     );
   }
   if (filters.rights) where.push(sql`f."rightsStatus" = ${filters.rights}`);
-  if (filters.flagged)
-    where.push(sql`jsonb_array_length(coalesce(f."safetyFlags", '[]'::jsonb)) > 0`);
+  if (filters.flagged) where.push(FLAGGED);
   if (filters.possibleDuplicates) where.push(sql`f."possibleDuplicates" > 0`);
   if (filters.creator) {
     const c = filters.creator.trim().replace(/^@/, '').toLowerCase();
@@ -393,6 +418,8 @@ function filterSql(filters: FeedFilters, now: Date): SQL[] {
   switch (filters.view) {
     case 'viral':
       where.push(sql`(f."reviewStatus" is null) and ${notUsed}`);
+      // Platform-labelled adult/graphic content never surfaces as a fresh breakout.
+      where.push(sql`not f."sourceExplicit"`);
       where.push(sql`f."scoreState" in ('scored', 'provisional')`);
       where.push(sql`f."sortTime" >= ${new Date(now.getTime() - VIRAL_NOW_HOURS * 3_600_000)}`);
       break;
@@ -525,7 +552,7 @@ export async function getSummary(db: AnyDatabase, now: Date = new Date()): Promi
       count(*) filter (where f."reviewStatus" = 'rejected')::int as rejected,
       count(*) filter (where f."reviewStatus" = 'already_used')::int as "alreadyUsed",
       count(*) filter (where f."scoreState" = 'insufficient_evidence')::int as "insufficientEvidence",
-      count(*) filter (where jsonb_array_length(coalesce(f."safetyFlags", '[]'::jsonb)) > 0)::int as flagged,
+      count(*) filter (where ${FLAGGED})::int as flagged,
       count(*) filter (where f.labels is null)::int as unclassified,
       count(*) filter (where f."reviewConflict" or f."rightsConflict")::int as conflicts,
       count(*) filter (where f."possibleDuplicates" > 0)::int as "possibleDuplicates"

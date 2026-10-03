@@ -138,5 +138,7 @@ describe('createInMemoryQuotaBudget', () => {
     expect(q.tryConsume('default', 500)).toBe(true);
     expect(q.remaining('default')).toBeNull();
     expect(q.usage()).toEqual({ 'search.list': 2, default: 500 });
+    // One metered request per successful consume; a refused one is not a request.
+    expect(q.requests()).toEqual({ 'search.list': 1, default: 1 });
   });
 });

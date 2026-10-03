@@ -305,9 +305,70 @@ describe('cross-source sightings', () => {
     expect(catSnapshots.map((s) => s.source)).toEqual(['youtube']);
   });
 
+  it('a reference seen first is enriched by its canonical adapter, keeping the Bluesky sighting', async () => {
+    const deps = testDeps(db, [youtube(), bluesky()], clock.now);
+    const run = await runDiscovery(deps, bskySearch);
+    const cat = (await all.videos()).find((v) => v.platformVideoId === 'vdFixture01')!;
+    // reference → canonical identity → YouTube lookup → authoritative metadata merged.
+    expect(cat).toMatchObject({
+      platform: 'youtube',
+      title: 'Cat discovers the vacuum cleaner',
+      availability: 'available',
+      durationMs: 42_000,
+    });
+    expect(cat.thumbnailUrl).toMatch(/^https:\/\/i\.ytimg\.com\//);
+    expect(cat.publishedAt).toBeInstanceOf(Date);
+    expect(cat.rawPayload).toMatchObject({ id: 'vdFixture01' });
+    expect(cat.creatorId).not.toBeNull();
+    expect(cat.creatorDisplayName).not.toBeNull();
+    expect(run.stats.enrichment).toMatchObject({ enriched: 1 });
+    expect(run.stats.enrichment?.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ videoId: cat.id, status: 'enriched', adapterId: 'youtube' }),
+      ]),
+    );
+    // The Bluesky observation is preserved; the lookup adds no sighting of its own.
+    const sightings = (await all.sightings()).filter((s) => s.platformVideoId === 'vdFixture01');
+    expect(sightings.map((s) => s.source)).toEqual(['bluesky']);
+    // Metrics come only from the canonical platform.
+    const snaps = (await all.snapshots()).filter((s) => s.platformVideoId === 'vdFixture01');
+    expect(snaps.map((s) => s.source)).toEqual(['youtube']);
+    // Enrichment is metered against YouTube's own quota (1 videos.list request).
+    const usage = await db.select().from(schema.apiUsage);
+    const yt = (await db.select().from(schema.sources)).find((s) => s.name === 'youtube')!;
+    expect(usage.filter((u) => u.sourceId === yt.id)).toEqual([
+      expect.objectContaining({ quotaBucket: 'default', unitsUsed: 1, requestCount: 1 }),
+    ]);
+  });
+
+  it('without a configured canonical adapter, references keep their reference data', async () => {
+    const run = await runDiscovery(testDeps(db, [bluesky()], clock.now), bskySearch);
+    const cat = (await all.videos()).find((v) => v.platformVideoId === 'vdFixture01')!;
+    expect(cat).toMatchObject({
+      title: 'cat vs vacuum 😂 - YouTube',
+      availability: 'unknown',
+      durationMs: null,
+      rawPayload: null,
+    });
+    expect(run.status).toBe('succeeded');
+    expect(run.stats.enrichment?.enriched).toBe(0);
+    expect(run.stats.enrichment?.noAdapter).toBeGreaterThan(0);
+  });
+
+  it('never lets weaker reference metadata overwrite authoritative data', async () => {
+    const deps = testDeps(db, [youtube(), bluesky()], clock.now);
+    await runDiscovery(deps, ytTrending);
+    clock.advance(HOUR);
+    const bsky = await runDiscovery(deps, bskySearch);
+    const cat = (await all.videos()).find((v) => v.platformVideoId === 'vdFixture01')!;
+    expect(cat.title).toBe('Cat discovers the vacuum cleaner');
+    // Already authoritatively observed: no extra lookup was spent on it.
+    expect(bsky.stats.enrichment?.results.map((r) => r.videoId) ?? []).not.toContain(cat.id);
+  });
+
   it('a reference seen first is later completed by the canonical platform', async () => {
     const deps = testDeps(db, [youtube(), bluesky()], clock.now);
-    await runDiscovery(deps, bskySearch);
+    await runDiscovery(deps, { ...bskySearch, enrichReferences: false });
     let cat = (await all.videos()).find((v) => v.platformVideoId === 'vdFixture01')!;
     expect(cat).toMatchObject({
       title: 'cat vs vacuum 😂 - YouTube',
@@ -378,7 +439,7 @@ describe('refreshMetrics', () => {
 
   it('refreshes videos that were only ever seen through another source', async () => {
     const deps = testDeps(db, [youtube(), bluesky()], clock.now);
-    await runDiscovery(deps, bskySearch);
+    await runDiscovery(deps, { ...bskySearch, enrichReferences: false });
     const summary = await refreshMetrics(deps, { platform: 'youtube', limit: 10 });
     expect(summary.snapshotsCreated).toBe(1);
     const [snap] = await all
