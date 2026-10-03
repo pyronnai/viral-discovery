@@ -22,23 +22,24 @@ afterEach(async () => {
 const ids = (items: FeedRow[]) => items.map((i) => i.clusterId);
 
 describe('feed ordering', () => {
-  it('scored (by score) → provisional → insufficient evidence → unscored', async () => {
+  it('any score by value (provisional can outrank scored) → insufficient evidence → unscored', async () => {
     const { items } = await getFeed(db, { now: NOW });
     expect(ids(items)).toEqual([
       seeded.breakout.clusterId,
-      seeded.lower.clusterId,
       seeded.provisional.clusterId,
+      seeded.lower.clusterId,
       seeded.insufficient.clusterId,
       seeded.unscored.clusterId,
     ]);
     expect(items.map((i) => i.scoreState)).toEqual([
       'scored',
-      'scored',
       'provisional',
+      'scored',
       'insufficient_evidence',
       null,
     ]);
     expect(items[0]!.score!).toBeGreaterThan(items[1]!.score!);
+    expect(items[1]!.score!).toBeGreaterThan(items[2]!.score!);
   });
 
   it('never treats a NULL score as zero', async () => {
@@ -85,7 +86,7 @@ describe('feed filters', () => {
       seeded.insufficient.clusterId,
     ]);
     expect(await only({ filters: { state: 'unscored' } })).toEqual([seeded.unscored.clusterId]);
-    expect(await only({ filters: { minScore: 70 } })).toEqual([seeded.breakout.clusterId]);
+    expect(await only({ filters: { minScore: 85 } })).toEqual([seeded.breakout.clusterId]);
     expect(await only({ filters: { label: 'animals' } })).toEqual([seeded.breakout.clusterId]);
     expect(await only({ filters: { label: 'gaming' } })).toEqual([]);
     expect((await only({ filters: { discoveredWithinHours: 2 } })).sort()).toEqual(
@@ -314,7 +315,7 @@ describe('detail', () => {
     expect(d.snapshots.map((s) => s.views)).toEqual([12_000, 48_000, 190_000]);
     expect(growthSeries(d.snapshots)).toMatchObject({ metric: 'views' });
     expect(d.scores).toHaveLength(1);
-    expect(d.scores[0]).toMatchObject({ algorithmVersion: 'breakout-v1.1', state: 'scored' });
+    expect(d.scores[0]).toMatchObject({ algorithmVersion: 'breakout-v2', state: 'scored' });
     expect(d.classifications[0]).toMatchObject({
       current: true,
       provider: 'fake',

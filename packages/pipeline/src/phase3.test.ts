@@ -231,7 +231,7 @@ describe('scoring lifecycle', () => {
       .from(schema.scores)
       .where(eq(schema.scores.videoId, cat))
       .orderBy(asc(schema.scores.computedAt));
-    expect(latest).toMatchObject({ algorithmVersion: 'breakout-v1.1', state: 'provisional' });
+    expect(latest).toMatchObject({ algorithmVersion: 'breakout-v2', state: 'provisional' });
     const rows = await db
       .select()
       .from(schema.scores)

@@ -1,12 +1,16 @@
 import { createHash } from 'node:crypto';
-import type { ScoringConfig } from './config.ts';
+import type { BreakoutV1Config } from './config.ts';
+import type { ScoringConfig } from './v2.ts';
 import type { ScoringInput } from './types.ts';
 
 /**
  * Stable hash of the evidence a score depends on (excluding the clock and the
  * population). Identical evidence ⇒ identical fingerprint ⇒ rescoring is a no-op.
  */
-export function evidenceFingerprint(input: ScoringInput, config: ScoringConfig): string {
+export function evidenceFingerprint(
+  input: ScoringInput,
+  config: ScoringConfig | BreakoutV1Config,
+): string {
   const asOf = input.asOf.getTime();
   const payload = {
     config,

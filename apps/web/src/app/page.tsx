@@ -39,7 +39,7 @@ const SORT_LABELS: Record<FeedSort, string> = {
 };
 
 const EMPTY: Record<InboxView, string> = {
-  viral: `Nothing fresh is breaking out right now (last ${VIRAL_NOW_HOURS}h, untriaged). Check Unreviewed, or Discovery health.`,
+  viral: `Nothing is breaking out right now (no candidate with real viral evidence in the window, untriaged). Check Unreviewed, or Discovery health.`,
   unreviewed: 'Inbox zero — every candidate has a decision.',
   saved: 'Nothing saved yet. Use ☆ Save on a card to build your shortlist.',
   obtained: 'Nothing marked obtained (and not yet used).',
@@ -52,13 +52,14 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   const params = await searchParams;
   const parsed = parseFilters(params);
   const view = effectiveView(parsed);
-  const filters: FeedFilters = { ...parsed, view };
+  const ctx = getContext();
+  const viralNowHours = ctx.config.VIRAL_NOW_HOURS ?? VIRAL_NOW_HOURS;
+  const filters: FeedFilters = { ...parsed, view, viralNowHours };
   const sort = parseSort(params);
   const cursor = typeof params['cursor'] === 'string' ? params['cursor'] : null;
-  const ctx = getContext();
   const now = new Date();
   const [summary, page, options] = await Promise.all([
-    getSummary(ctx.db, now),
+    getSummary(ctx.db, now, { viralNowHours }),
     getFeed(ctx.db, { filters, sort, cursor, pageSize: PAGE_SIZE, now }),
     getFilterOptions(ctx.db),
   ]);

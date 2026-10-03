@@ -43,6 +43,8 @@ export const EnvSchema = z.object({
   CLASSIFICATION_MIN_SCORE: z.coerce.number().min(0).max(100).default(60),
 
   // ── web dashboard ─────────────────────────────────────────────────────────
+  /** Viral Now window in hours (default: the scoring algorithm's window, 48). */
+  VIRAL_NOW_HOURS: z.coerce.number().int().min(1).max(720).optional(),
   /**
    * Optional access gate for the internal dashboard. When set, every page asks for
    * this token once (stored as a hashed, httpOnly cookie). Use ≥ 16 random chars.

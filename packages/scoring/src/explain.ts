@@ -1,6 +1,11 @@
 import type { ComponentName, ScoreResult } from './types.ts';
 
 const LABELS: Record<ComponentName, string> = {
+  momentum: 'momentum (pace × reach core)',
+  pace: 'inferred pace (since publish)',
+  reach: 'reach (audience evidence)',
+  age: 'age discount (inferred pace only)',
+  trend: 'trend',
   velocity: 'velocity',
   acceleration: 'acceleration',
   engagement: 'engagement',
@@ -11,7 +16,7 @@ const LABELS: Record<ComponentName, string> = {
 };
 
 /** Human-readable breakdown, e.g. for the CLI and (later) the review dashboard. */
-export function explainScore(result: ScoreResult): string[] {
+export function explainScore<C extends ComponentName>(result: ScoreResult<C>): string[] {
   const head =
     result.score === null
       ? `Virality score: — (${result.state}; confidence ${result.confidence})`
@@ -19,7 +24,7 @@ export function explainScore(result: ScoreResult): string[] {
   const lines = [head];
   for (const [name, c] of Object.entries(result.components) as [
     ComponentName,
-    ScoreResult['components'][ComponentName],
+    ScoreResult<C>['components'][C],
   ][]) {
     if (!c.available) {
       lines.push(`  - ${LABELS[name]}: unavailable (${c.reason})`);
@@ -34,7 +39,11 @@ export function explainScore(result: ScoreResult): string[] {
     if (name === 'sourcePropagation')
       extra = ` — ${String(d['interactions'])} interactions on ${String(d['items'])} source item(s)`;
     if (name === 'freshness') extra = ` — ${String(d['ageHours'])}h old`;
-    if (name === 'acceleration') extra = ` — ×${String(d['ratio'])}`;
+    if (name === 'acceleration' || name === 'trend') extra = ` — ×${String(d['ratio'])}`;
+    if (name === 'pace')
+      extra = ` — ${String(d['perHour'])} ${String(d['metric'])}/h at ${String(d['ageHours'])}h old`;
+    if (name === 'reach') extra = ` — ${String(d['count'])} ${String(d['metric'])}`;
+    if (name === 'momentum') extra = ` — ${String(d['observedShare'])} measured`;
     lines.push(`  - ${LABELS[name]}: ${c.strength} (${c.value})${extra}`);
   }
   const fmt = (list: { source: string; observations: number }[]) =>
@@ -47,6 +56,10 @@ export function explainScore(result: ScoreResult): string[] {
     lines.push(`  non-propagation observations: ${fmt(nonPropagation)} (not counted as spread)`);
   }
   if (result.reasonCodes.length) lines.push(`  reasons: ${result.reasonCodes.join(', ')}`);
+  if (result.viralNow)
+    lines.push(
+      `  viral now: ${result.viralNow.evidence ? 'eligible on evidence' : 'not enough evidence'}${result.viralNow.revival ? ' · measured revival' : ''} (window ${result.viralNow.windowHours}h)`,
+    );
   lines.push(
     `  next time-based rescore: ${result.nextRescoreAt ? result.nextRescoreAt.toISOString() : 'none (only on new evidence)'}`,
   );

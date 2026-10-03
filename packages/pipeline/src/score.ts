@@ -184,7 +184,7 @@ export async function loadPopulation(
       ),
     )
     .orderBy(scores.videoId, desc(scores.computedAt));
-  const population: PlatformPopulation = { logVelocity: {}, engagementRate: {} };
+  const population: PlatformPopulation = { logVelocity: {}, engagementRate: {}, logPace: {} };
   for (const { components } of rows) {
     const velocity = components['velocity'] as
       { available?: boolean; details?: Record<string, unknown> } | undefined;
@@ -192,6 +192,14 @@ export async function loadPopulation(
     const log = num(velocity?.details?.['logPerHour']);
     if (velocity?.available && (metric === 'views' || metric === 'likes') && log !== null) {
       (population.logVelocity[metric] ??= []).push(log);
+    }
+    // breakout-v2: inferred pace since publish (same units as measured velocity).
+    const pace = components['pace'] as
+      { available?: boolean; details?: Record<string, unknown> } | undefined;
+    const paceMetric = pace?.details?.['metric'];
+    const logPace = num(pace?.details?.['logPace']);
+    if (pace?.available && (paceMetric === 'views' || paceMetric === 'likes') && logPace !== null) {
+      ((population.logPace ??= {})[paceMetric] ??= []).push(logPace);
     }
     const engagement = components['engagement'] as
       { available?: boolean; details?: { rates?: Record<string, { rate?: unknown }> } } | undefined;
@@ -250,6 +258,8 @@ export async function scoreVideo(
           rawScore: result.rawScore,
           growthMetric: result.growthMetric,
           observations: result.observations,
+          // breakout-v2: Viral Now evidence (the inbox applies window, review and safety).
+          ...(result.viralNow ? { viralNow: result.viralNow } : {}),
         },
       },
       missingMetrics: result.missingMetrics,

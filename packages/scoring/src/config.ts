@@ -1,12 +1,13 @@
-import type { ComponentName, EngagementMetric, GrowthMetric } from './types.ts';
+import type { EngagementMetric, GrowthMetric, V1ComponentName } from './types.ts';
 
 /**
- * Every tunable of the breakout score. Changing any value is a new algorithm:
- * bump `version` so scores from different formulas are never compared blindly.
+ * Every tunable of the breakout-v1.x score (kept for its stored history and as the
+ * measurement source v2 reuses for engagement, propagation and creator outlier).
+ * Changing any value is a new algorithm: bump `version`.
  */
-export interface ScoringConfig {
+export interface BreakoutV1Config {
   version: string;
-  weights: Record<ComponentName, number>;
+  weights: Record<V1ComponentName, number>;
   /** Minimum time between two snapshots for a velocity reading. */
   minSpanMinutes: number;
   /** Velocity blend: absolute (log growth/hour) vs relative (growth / previous count). */
@@ -44,7 +45,7 @@ export interface ScoringConfig {
   maxAccelerationRatio: number;
 }
 
-export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
+export const BREAKOUT_V1_1_CONFIG: BreakoutV1Config = {
   // v1.1: manual submissions excluded from propagation; age-matched creator outlier;
   // time-based staleness. Weights and fallback constants unchanged from v1.
   version: 'breakout-v1.1',

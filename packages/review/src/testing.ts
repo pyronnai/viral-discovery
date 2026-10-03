@@ -158,7 +158,14 @@ export async function seedCandidate(
       value: r.score,
       state: r.state,
       confidence: r.confidence,
-      components: { ...r.components, _meta: { observations: r.observations } },
+      // The same shape the pipeline stores (scoreVideo).
+      components: {
+        ...r.components,
+        _meta: {
+          observations: r.observations,
+          ...(r.viralNow ? { viralNow: r.viralNow } : {}),
+        },
+      },
       missingMetrics: r.missingMetrics,
       reasonCodes: r.reasonCodes,
       inputsHash: 'fixture',

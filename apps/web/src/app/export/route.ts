@@ -30,7 +30,11 @@ export async function GET(request: Request): Promise<Response> {
     } else {
       const parsed = parseFilters(params);
       rows = await getExportRows(ctx.db, {
-        filters: { ...parsed, view: effectiveView(parsed) },
+        filters: {
+          ...parsed,
+          view: effectiveView(parsed),
+          viralNowHours: ctx.config.VIRAL_NOW_HOURS,
+        },
         now,
       });
     }

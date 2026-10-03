@@ -99,6 +99,10 @@ export interface FeedRow {
   possibleDuplicateOfUsed: boolean;
   /** Platform-normalized growth (score component), when measurable. */
   velocity: number | null;
+  /** The score carries meaningful viral evidence (breakout-v2 assessment). */
+  viralEvidence: boolean;
+  /** Measured revival of an older video (may enter Viral Now outside the window). */
+  viralRevival: boolean;
   stateRank: number;
   sortTime: Date;
 }
@@ -133,12 +137,17 @@ export interface FeedFilters {
   view?: InboxView | undefined;
   /** Creator display name or handle (case-insensitive exact match). */
   creator?: string | undefined;
+  /** Viral Now window override in hours (default VIRAL_NOW_HOURS). Not a URL filter. */
+  viralNowHours?: number | undefined;
 }
 
 /**
  * Inbox views:
- * - viral:      Viral Now — fresh (≤ VIRAL_NOW_HOURS), scored/provisional breakouts not yet
- *               triaged (no decision, or an open merge conflict), never used or rejected.
+ * - viral:      Viral Now — untriaged candidates whose score carries meaningful viral
+ *               evidence (breakout-v2: enough reach and score; metric-less items never
+ *               qualify), published (or, if unknown, discovered) within the window — or
+ *               outside it with a recently MEASURED revival — never used, rejected, or
+ *               explicitly labelled adult/graphic by the source platform.
  * - unreviewed: no decision yet (any score state).
  * - saved:      the shortlist.
  * - obtained:   media obtained externally and not yet used.
@@ -156,7 +165,8 @@ export const INBOX_VIEWS = [
   'all',
 ] as const;
 export type InboxView = (typeof INBOX_VIEWS)[number];
-export const VIRAL_NOW_HOURS = 72;
+/** Default Viral Now window; configurable per request (and VIRAL_NOW_HOURS in the web app). */
+export const VIRAL_NOW_HOURS = DEFAULT_SCORING_CONFIG.viralNow.windowHours;
 
 /**
  * Sorts. Unavailable values never compare as zero: rows without the value sort
@@ -316,7 +326,10 @@ export function baseQuery(): SQL {
                order by e.created_at desc, e.id desc limit 1) = 'already_used') as "possibleDuplicateOfUsed",
       case when s.components->'velocity'->>'available' = 'true'
         then (s.components->'velocity'->>'value')::float8 end as velocity,
-      case s.state when 'scored' then 0 when 'provisional' then 1 when 'insufficient_evidence' then 2 else 3 end as "stateRank",
+      -- Any virality value ranks by value (provisional can rank first); then no-evidence, then unscored.
+      case when s.value is not null then 0 when s.state is not null then 1 else 2 end as "stateRank",
+      coalesce((s.components->'_meta'->'viralNow'->>'evidence')::boolean, false) as "viralEvidence",
+      coalesce((s.components->'_meta'->'viralNow'->>'revival')::boolean, false) as "viralRevival",
       coalesce(v.published_at, v.first_discovered_at) as "sortTime"
     from clusters c
     join lateral (
@@ -416,13 +429,21 @@ function filterSql(filters: FeedFilters, now: Date): SQL[] {
   }
   const notUsed = sql`f."reviewStatus" is distinct from 'already_used'`;
   switch (filters.view) {
-    case 'viral':
+    case 'viral': {
+      const since = new Date(
+        now.getTime() - (filters.viralNowHours ?? VIRAL_NOW_HOURS) * 3_600_000,
+      );
       where.push(sql`(f."reviewStatus" is null) and ${notUsed}`);
       // Platform-labelled adult/graphic content never surfaces as a fresh breakout.
       where.push(sql`not f."sourceExplicit"`);
-      where.push(sql`f."scoreState" in ('scored', 'provisional')`);
-      where.push(sql`f."sortTime" >= ${new Date(now.getTime() - VIRAL_NOW_HOURS * 3_600_000)}`);
+      // Meaningful quantitative evidence, judged by the scoring algorithm.
+      where.push(sql`f."viralEvidence"`);
+      // Recent — or older with a recently measured revival.
+      where.push(
+        sql`(f."sortTime" >= ${since} or (f."viralRevival" and f."metricsAt" >= ${since}))`,
+      );
       break;
+    }
     case 'unreviewed':
       where.push(sql`f."reviewStatus" is null and not f."reviewConflict"`);
       break;
@@ -537,8 +558,15 @@ export interface FeedSummary {
 /** "Breaking out" = scored with a latest virality score at or above this. */
 export const BREAKING_OUT_SCORE = 70;
 
-export async function getSummary(db: AnyDatabase, now: Date = new Date()): Promise<FeedSummary> {
-  const viral = sql.join(filterSql({ view: 'viral' }, now), sql` and `);
+export async function getSummary(
+  db: AnyDatabase,
+  now: Date = new Date(),
+  options: { viralNowHours?: number | undefined } = {},
+): Promise<FeedSummary> {
+  const viral = sql.join(
+    filterSql({ view: 'viral', viralNowHours: options.viralNowHours }, now),
+    sql` and `,
+  );
   const [row] = await rows<FeedSummary>(
     db,
     sql`select

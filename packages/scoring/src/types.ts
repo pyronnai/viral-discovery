@@ -57,6 +57,8 @@ export interface CreatorHistory {
 export interface PlatformPopulation {
   /** log10(1 + growth per hour) values, per growth metric. */
   logVelocity: Partial<Record<GrowthMetric, number[]>>;
+  /** breakout-v2: log10(1 + inferred pace per hour since publish), per growth metric. */
+  logPace?: Partial<Record<GrowthMetric, number[]>>;
   /** Engagement ratios (metric / views). */
   engagementRate: Partial<Record<EngagementMetric, number[]>>;
 }
@@ -76,7 +78,7 @@ export interface ScoringInput {
   asOf: Date;
 }
 
-export const COMPONENT_NAMES = [
+export const V1_COMPONENT_NAMES = [
   'velocity',
   'acceleration',
   'engagement',
@@ -85,7 +87,36 @@ export const COMPONENT_NAMES = [
   'sourcePropagation',
   'creatorOutlier',
 ] as const;
-export type ComponentName = (typeof COMPONENT_NAMES)[number];
+export type V1ComponentName = (typeof V1_COMPONENT_NAMES)[number];
+
+/** breakout-v2 components (see v2.ts). */
+export const COMPONENT_NAMES = [
+  'momentum',
+  'pace',
+  'reach',
+  'age',
+  'velocity',
+  'trend',
+  'engagement',
+  'creatorOutlier',
+  'crossSource',
+  'sourcePropagation',
+] as const;
+export type V2ComponentName = (typeof COMPONENT_NAMES)[number];
+export type ComponentName = V1ComponentName | V2ComponentName;
+
+/**
+ * Viral Now evidence assessment (breakout-v2). Time window, review state and
+ * safety labels are applied by the inbox at query time.
+ */
+export interface ViralNowAssessment {
+  /** Meaningful quantitative evidence: not insufficient, enough reach, score ≥ floor. */
+  evidence: boolean;
+  /** Measured current velocity strong enough to re-enter Viral Now outside the window. */
+  revival: boolean;
+  /** Default window (hours since publish/discovery) the algorithm was designed for. */
+  windowHours: number;
+}
 
 /** Where a component's evidence comes from. Never merged. */
 export type EvidenceBasis = 'canonical' | 'discovery' | 'source_propagation';
@@ -111,15 +142,17 @@ export type Component =
       details?: Record<string, unknown>;
     };
 
-export interface ScoreResult {
+export interface ScoreResult<C extends ComponentName = V2ComponentName> {
   algorithmVersion: string;
   state: ScoreState;
   /** 0–100 with one decimal, or null for insufficient_evidence. */
   score: number | null;
-  /** Weighted mean of available components before evidence dampening (0–1). */
+  /** v1: weighted mean before evidence dampening; v2: final 0–1 value before ×100. */
   rawScore: number | null;
   confidence: number;
-  components: Record<ComponentName, Component>;
+  components: Record<C, Component>;
+  /** breakout-v2 only. */
+  viralNow?: ViralNowAssessment;
   reasonCodes: string[];
   missingMetrics: MetricKey[];
   growthMetric: GrowthMetric | null;
@@ -129,7 +162,7 @@ export interface ScoreResult {
     nonPropagation: { source: string; observations: number }[];
   };
   /**
-   * When time alone (freshness decay) makes this score stale; null when time-only
+   * When time alone (freshness/age decay) makes this score stale; null when time-only
    * rescoring is not useful (insufficient evidence, or aged out of the window).
    */
   nextRescoreAt: Date | null;

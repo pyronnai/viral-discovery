@@ -95,7 +95,9 @@ pnpm cli duplicates list         # possible duplicates with evidence (--status c
 pnpm cli duplicates explain <videoA> <videoB>   # evidence for one pair, stores nothing
 ```
 
-- **🔥 Viral Now** (default): fresh (≤ 72 h), scored/provisional breakouts you haven't triaged,
+- **🔥 Viral Now** (default): videos with real viral evidence (breakout-v2: pace for their age ×
+  audience, from the first snapshot) published within 48 h (`VIRAL_NOW_HOURS`) or measurably
+  reviving, that you haven't triaged,
   ranked by the deterministic virality score. **👀 Unreviewed**, **★ Saved** (shortlist),
   **⬇ Obtained** (you got the media externally, not yet used), **✓ Already used**, Rejected, All.
 - Quick category chips (funny, animals, fails, reactions, memes, unexpected), filters (platform,

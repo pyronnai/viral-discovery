@@ -14,7 +14,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock('../lib/server.ts', () => ({
-  getContext: () => ({ db: context.db, logger: { error: vi.fn() } }),
+  getContext: () => ({ db: context.db, config: {}, logger: { error: vi.fn() } }),
 }));
 
 const { CandidateCard } = await import('./CandidateCard.tsx');
@@ -54,7 +54,7 @@ describe('inbox card', () => {
       'Fixture Pets',
       'YouTube',
       '11h',
-      '79',
+      '94',
       'animals',
       '190k views · 15.5k likes · 910 comments',
       'Rights: Unknown',

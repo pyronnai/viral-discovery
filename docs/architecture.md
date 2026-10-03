@@ -228,9 +228,60 @@ allowlisted TikTok short links with bounded HEAD redirects and never fetches vid
   **YouTube documents no maximum**; Twitch Get Clips ≤ 100 ids; Bluesky `getPosts` ≤ 25).
 - Platforms without canonical metrics (TikTok via oEmbed) are never refreshed; nothing is fabricated.
 
-## Virality / breakout scoring (`breakout-v1.1`)
+## Virality / breakout scoring (`breakout-v2`, current)
 
-_v1.1 (Phase 3.1) changed only evidence selection and aging — manual submissions excluded from
+Goal: _which videos are ALREADY performing exceptionally for their age, right now_ — useful from
+the **first** authoritative snapshot. The refresh ladder (+2 h, +8 h, +24 h, +72 h) then validates
+and corrects that estimate; it never gates visibility. Pure and deterministic (`@vd/scoring`,
+`v2.ts`); `breakout-v1.1` rows are kept untouched and the inbox reads v2 only.
+
+```
+P  inferred pace   = norm(log10(1 + count ÷ max(age_at_snapshot, 1 h)))      platform scale
+M  measured rate   = norm(log10(1 + growth/h between our snapshots))         same scale as P
+β  observed share  = span ÷ (span + 2 h)          (0 with one snapshot; ≈0.5 at +2 h, ≈0.8 at +8 h)
+F  age discount    = 1 for 24 h, then halves every 48 h        (inferred part only)
+R  reach           = norm(log10(1 + current count))           per-platform audience scale
+
+paceCore = (1 − β)·P·F + β·M
+core     = paceCore^0.6 · R^0.4                                reach stays in the core
+score    = 100 · softCap(core · trend · engagement · creator + propagationBonus)
+```
+
+- **Count** is views; platforms without views (Bluesky) use likes on their own scale. Fallback
+  scales (log10 of [lo, hi] → [0, 1]): YouTube pace 10/h…50k/h, reach 100…1M; Twitch pace
+  5/h…5k/h, reach 100…100k (a high audience bar: a few hundred clip views is a small sample, a
+  clip with tens of thousands competes with the best YouTube videos); likes 1/h…1k/h, 10…10k.
+- **Platform percentile**: once ≥ 30 v2 scores exist for a platform (14-day window), the
+  percentile of log pace is blended in, weight rising smoothly from 0 to at most 50 % at 100 —
+  the documented scale always keeps ≥ 50 %, so the best item of a weak pool is not "viral" by
+  default.
+- **Bounded modifiers**: trend ×(1 ± 0.15·β) from the measured rate vs the earlier rate (previous
+  interval, or the lifetime pace at the earlier snapshot); engagement ×0.9–1.1 and creator
+  outlier ×1.0–1.1 (v1.1's measurements, skipped when unavailable); propagation bonus ≤ +0.10
+  (cross-source sightings, discovery-source engagement). `softCap` is the identity up to 0.8
+  and approaches 1 smoothly above it, so strong candidates stay ordered instead of tying at 100.
+- **Confidence** (0.2 + 0.3·R + 0.35·β, + publish time known, + percentile backing) is shown,
+  never multiplied in: _provisional means less certain, not less viral_.
+- **States**: `insufficient_evidence` (no score) — no canonical metric, reach < 0.1 without a
+  measurement (e.g. 200 views at 10 min), or publish time unknown without a measurement (time
+  since discovery would overstate pace); `provisional` — inferred pace only; `scored` — measured.
+- **Time**: the age discount decays, so `next_rescore_at` schedules time-only rescoring until
+  it reaches its floor (same lifecycle as v1.1).
+- **Viral Now evidence** (stored in `components._meta.viralNow`): not insufficient, reach ≥ 0.1
+  and score ≥ 30. **Revival**: measured velocity ≥ 0.6 with β ≥ 0.5, reach ≥ 0.1, and a rate at
+  least the earlier rate (renewed momentum, not an ordinary long tail).
+
+### Viral Now eligibility
+
+Untriaged (no decision, not used/rejected) **and** no explicit platform moderation label **and**
+v2 viral evidence **and** published (else discovered) within the window — default **48 h**,
+`VIRAL_NOW_HOURS` in the web app, `viralNowHours` per query — **or** a measured revival whose
+latest snapshot is within the window. Sorted by score (any state with a value first).
+
+## Virality / breakout scoring (`breakout-v1.1`, historical)
+
+_Superseded by breakout-v2 (its rows stay in `scores`; v2 reuses its engagement, propagation
+and creator-outlier measurements). v1.1 (Phase 3.1) changed only evidence selection and aging — manual submissions excluded from
 propagation, age-matched creator outlier, time-based staleness. Weights and fallback constants
 are unchanged and still uncalibrated._
 
@@ -426,14 +477,14 @@ reposts are shown as "Also on" representations of that item, never as separate i
 
 **Views** (`?view=`, `@vd/review` `INBOX_VIEWS`):
 
-| View              | Shows                                                                                                                       |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `viral` (default) | **Viral Now**: published (else discovered) ≤ 72 h, score state scored/provisional, no current decision, never used/rejected |
-| `unreviewed`      | no decision (any score state, incl. insufficient evidence)                                                                  |
-| `saved`           | the shortlist                                                                                                               |
-| `obtained`        | obtained externally and **not yet used**                                                                                    |
-| `used`            | already used (history)                                                                                                      |
-| `rejected`, `all` | as named                                                                                                                    |
+| View              | Shows                                                                                                                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `viral` (default) | **Viral Now**: v2 viral evidence, published (else discovered) ≤ 48 h (configurable) or a recent measured revival, no current decision, never used/rejected, no explicit platform label |
+| `unreviewed`      | no decision (any score state, incl. insufficient evidence)                                                                                                                             |
+| `saved`           | the shortlist                                                                                                                                                                          |
+| `obtained`        | obtained externally and **not yet used**                                                                                                                                               |
+| `used`            | already used (history)                                                                                                                                                                 |
+| `rejected`, `all` | as named                                                                                                                                                                               |
 
 Ordering within Viral Now is the existing deterministic score (no new formula). **Sorts**
 (`?sort=`): `virality` (score state, then score — platforms without view counts still rank via

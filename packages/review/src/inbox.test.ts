@@ -5,7 +5,7 @@ import { confirmDuplicate } from '@vd/dedupe';
 import { ReviewError, bulkApply, recordAcquisition, recordReview, setSaved } from './actions.ts';
 import { getCreatorHistory } from './detail.ts';
 import { csvCell, getExportRows, toCsv, toJson } from './export.ts';
-import { getFeed, getSummary, type FeedFilters, type FeedSort } from './feed.ts';
+import { VIRAL_NOW_HOURS, getFeed, getSummary, type FeedFilters, type FeedSort } from './feed.ts';
 import { getDiscoveryHealth } from './health.ts';
 import { toCardView } from './present.ts';
 import { NOW, ROLES, createTestDb, hoursAgo, seedCandidate, seedFeed } from './testing.ts';
@@ -104,7 +104,7 @@ describe('source moderation (platform labels, not AI)', () => {
 });
 
 describe('Viral Now', () => {
-  it('shows fresh, scored/provisional, untriaged breakouts by virality', async () => {
+  it('shows untriaged breakouts with real viral evidence by virality', async () => {
     expect(await ids({ view: 'viral' })).toEqual([
       seeded.breakout.clusterId,
       seeded.provisional.clusterId,
@@ -117,6 +117,85 @@ describe('Viral Now', () => {
   it('drops a candidate once it is triaged (saved, rejected, used)', async () => {
     await setSaved(db, { clusterId: seeded.breakout.clusterId, saved: true, now: later(1) });
     expect(await ids({ view: 'viral' })).toEqual([seeded.provisional.clusterId]);
+  });
+
+  /** A 10-day-old video measured at `[hoursAgo, views]` readings. */
+  const oldVideo = (id: string, snapshots: [number, number][]) =>
+    seedCandidate(db, {
+      platform: 'youtube',
+      platformVideoId: id,
+      title: `old video ${id}`,
+      publishedAt: hoursAgo(240),
+      firstDiscoveredAt: hoursAgo(snapshots[0]![0]),
+      snapshots: snapshots.map(([h, views]) => ({ at: hoursAgo(h), views })),
+      sightings: [{ source: 'youtube', key: `search:${id}`, at: hoursAgo(snapshots[0]![0]) }],
+    });
+
+  it('keeps an old video out of the 48h window unless a recent measurement shows a revival', async () => {
+    // Evidence alone is not enough outside the window: the 5-day-old "Top 10" stays out.
+    const lower = (await getFeed(db, { now: NOW, pageSize: 100 })).items.find(
+      (i) => i.clusterId === seeded.lower.clusterId,
+    )!;
+    expect(lower.viralEvidence).toBe(true);
+    expect(lower.viralRevival).toBe(false);
+    expect(await ids({ view: 'viral' })).not.toContain(seeded.lower.clusterId);
+
+    const tail = await oldVideo('vdOldTail01', [
+      [4, 5_000_000],
+      [0, 5_010_000],
+    ]);
+    const revived = await oldVideo('vdRevived01', [
+      [4, 5_000_000],
+      [0, 5_400_000],
+    ]);
+    const staleRevival = await oldVideo('vdOldRevival', [
+      [100, 5_000_000],
+      [96, 5_400_000],
+    ]);
+    const viral = await ids({ view: 'viral' });
+    expect(viral).toContain(revived.clusterId);
+    expect(viral).not.toContain(tail.clusterId);
+    // A revival measured days ago is not "now".
+    expect(viral).not.toContain(staleRevival.clusterId);
+  });
+
+  it('uses a configurable window (default 48h)', async () => {
+    expect(VIRAL_NOW_HOURS).toBe(48);
+    const fresh = await seedCandidate(db, {
+      platform: 'youtube',
+      platformVideoId: 'vdFresh0010h',
+      title: 'ten hours old, one snapshot',
+      publishedAt: hoursAgo(10),
+      firstDiscoveredAt: hoursAgo(1),
+      snapshots: [{ at: hoursAgo(1), views: 300_000 }],
+      sightings: [{ source: 'youtube', key: 'search:fresh', at: hoursAgo(1) }],
+    });
+    expect(await ids({ view: 'viral' })).toContain(fresh.clusterId);
+    // 6h: the 10h-old video (no measurement) falls outside; the 2h-old clip stays.
+    const narrow = await ids({ view: 'viral', viralNowHours: 6 });
+    expect(narrow).toContain(seeded.provisional.clusterId);
+    expect(narrow).not.toContain(fresh.clusterId);
+    // The 11h-old breakout stays: measured right now and accelerating (revival rule).
+    expect(narrow).toContain(seeded.breakout.clusterId);
+    // A week: the 5-day-old video with real evidence comes back in.
+    expect(await ids({ view: 'viral' })).not.toContain(seeded.lower.clusterId);
+    expect(await ids({ view: 'viral', viralNowHours: 168 })).toContain(seeded.lower.clusterId);
+    expect((await getSummary(db, NOW, { viralNowHours: 6 })).viralNow).toBe(2);
+    expect((await getSummary(db, NOW)).viralNow).toBe(3);
+  });
+
+  it('metric-less candidates never qualify, whatever their freshness', async () => {
+    const native = await seedCandidate(db, {
+      platform: 'bluesky',
+      platformVideoId: 'at://did:plc:x/app.bsky.feed.post/fresh',
+      title: null,
+      publishedAt: hoursAgo(0.3),
+      firstDiscoveredAt: hoursAgo(0.3),
+      snapshots: [{ at: hoursAgo(0.3), likes: 0, comments: 0 }],
+      sightings: [{ source: 'bluesky', key: 'at://fresh', at: hoursAgo(0.3) }],
+    });
+    expect(await ids({ view: 'viral' })).not.toContain(native.clusterId);
+    expect(await ids({ view: 'unreviewed' })).toContain(native.clusterId);
   });
 });
 
@@ -289,7 +368,7 @@ describe('quick filters and sorting', () => {
     expect(await ids({ platform: 'twitch', view: 'viral' })).toEqual([
       seeded.provisional.clusterId,
     ]);
-    expect(await ids({ minScore: 50, view: 'all' })).toEqual([seeded.breakout.clusterId]);
+    expect(await ids({ minScore: 90, view: 'all' })).toEqual([seeded.breakout.clusterId]);
     expect(await ids({ discoveredWithinHours: 1 })).toEqual([
       seeded.provisional.clusterId,
       seeded.unscored.clusterId,
@@ -310,8 +389,12 @@ describe('quick filters and sorting', () => {
     // Newest: by publish time (else discovery).
     expect((await ids({}, 'newest'))[0]).toBe(seeded.unscored.clusterId);
     expect((await ids({}, 'discovered'))[0]).toBe(seeded.unscored.clusterId);
-    // Fastest growing: only measured growth ranks; the rest follow.
-    expect((await ids({}, 'growth'))[0]).toBe(seeded.breakout.clusterId);
+    // Fastest growing: only measured growth ranks (platform-normalized views/h; the old
+    // 5M-view video gains 25k/h vs the breakout's 23.7k/h); the rest follow.
+    expect((await ids({}, 'growth')).slice(0, 2)).toEqual([
+      seeded.lower.clusterId,
+      seeded.breakout.clusterId,
+    ]);
   });
 
   it('paginates every sort with a stable cursor', async () => {
@@ -389,7 +472,7 @@ describe('export', () => {
       platform: 'YouTube',
       canonicalUrl: 'https://example.test/youtube/vdFixture01',
       alternates: [],
-      viralityScore: 78.8,
+      viralityScore: 94.2,
       labels: ['animals', 'funny', 'unexpected'],
       durationSeconds: 42,
       rights: 'Unknown',
@@ -403,7 +486,7 @@ describe('export', () => {
       'title,creator,creator_handle,platform,canonical_url,alternate_urls,virality_score,score_state,labels,platform_labels,duration_seconds,published_at,views,rights,review,obtained,obtained_at,obtained_note,possible_duplicates,media_download_available,cluster_id',
     );
     expect(csv).toContain(
-      'Cat discovers the vacuum cleaner,Fixture Pets,,YouTube,https://example.test/youtube/vdFixture01,,78.8,scored,"animals, funny, unexpected",,42,',
+      'Cat discovers the vacuum cleaner,Fixture Pets,,YouTube,https://example.test/youtube/vdFixture01,,94.2,scored,"animals, funny, unexpected",,42,',
     );
     const json = JSON.parse(toJson(rows, NOW)) as { count: number; note: string };
     expect(json.count).toBe(1);

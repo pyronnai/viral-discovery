@@ -9,11 +9,11 @@
  * Canonical metrics and discovery-source propagation are separate components.
  */
 import { METRIC_KEYS, type MetricKey, type ScoreState } from '@vd/core';
-import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from './config.ts';
+import { BREAKOUT_V1_1_CONFIG, type BreakoutV1Config } from './config.ts';
 import {
-  COMPONENT_NAMES,
+  V1_COMPONENT_NAMES,
   type Component,
-  type ComponentName,
+  type V1ComponentName,
   type EngagementMetric,
   type GrowthMetric,
   type ScoreResult,
@@ -25,13 +25,13 @@ import {
 const HOUR = 3_600_000;
 const ENGAGEMENT_METRICS: readonly EngagementMetric[] = ['likes', 'comments', 'shares'];
 
-interface Point {
+export interface Point {
   at: number;
   value: number;
 }
 
-const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
-const round = (x: number, digits = 4) => Math.round(x * 10 ** digits) / 10 ** digits;
+export const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+export const round = (x: number, digits = 4) => Math.round(x * 10 ** digits) / 10 ** digits;
 
 export function strength(value: number): Strength {
   if (value >= 0.85) return 'very strong';
@@ -52,13 +52,13 @@ export function percentile(sample: readonly number[], x: number): number {
   return sample.length === 0 ? 0 : (below + equal / 2) / sample.length;
 }
 
-function valueOf(snapshot: SnapshotInput, metric: MetricKey): number | null {
+export function valueOf(snapshot: SnapshotInput, metric: MetricKey): number | null {
   const v = snapshot.metrics[metric];
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 /** Chronological points for one metric; the last reading wins for identical timestamps. */
-function series(snapshots: readonly SnapshotInput[], metric: MetricKey): Point[] {
+export function series(snapshots: readonly SnapshotInput[], metric: MetricKey): Point[] {
   const byTime = new Map<number, number>();
   for (const s of [...snapshots].sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime())) {
     const v = valueOf(s, metric);
@@ -68,7 +68,11 @@ function series(snapshots: readonly SnapshotInput[], metric: MetricKey): Point[]
 }
 
 /** Latest point at least minSpan before `later`. */
-function earlierPoint(points: readonly Point[], later: Point, minSpanMs: number): Point | null {
+export function earlierPoint(
+  points: readonly Point[],
+  later: Point,
+  minSpanMs: number,
+): Point | null {
   for (let i = points.length - 1; i >= 0; i--) {
     const p = points[i];
     if (p && p.at <= later.at - minSpanMs) return p;
@@ -76,7 +80,7 @@ function earlierPoint(points: readonly Point[], later: Point, minSpanMs: number)
   return null;
 }
 
-function available(
+export function available(
   value: number,
   weight: number,
   basis: Component['basis'],
@@ -95,7 +99,7 @@ function available(
   };
 }
 
-function unavailable(
+export function unavailable(
   reason: string,
   weight: number,
   basis: Component['basis'],
@@ -104,10 +108,11 @@ function unavailable(
   return { available: false, reason, weight, basis, ...(details ? { details } : {}) };
 }
 
-export function scoreCandidate(
+/** breakout-v1.x (historical; v2 reuses its engagement/propagation/creator measurements). */
+export function scoreCandidateV1(
   input: ScoringInput,
-  config: ScoringConfig = DEFAULT_SCORING_CONFIG,
-): ScoreResult {
+  config: BreakoutV1Config = BREAKOUT_V1_1_CONFIG,
+): ScoreResult<V1ComponentName> {
   const w = config.weights;
   const minSpanMs = config.minSpanMinutes * 60_000;
   const asOf = input.asOf.getTime();
@@ -440,7 +445,7 @@ export function scoreCandidate(
     }
   }
 
-  const components: Record<ComponentName, Component> = {
+  const components: Record<V1ComponentName, Component> = {
     velocity,
     acceleration,
     engagement,
@@ -486,7 +491,7 @@ export function scoreCandidate(
   if (state !== 'insufficient_evidence') {
     let weighted = 0;
     let weights = 0;
-    for (const name of COMPONENT_NAMES) {
+    for (const name of V1_COMPONENT_NAMES) {
       const c = components[name];
       if (!c.available) continue;
       weighted += c.value * c.weight;

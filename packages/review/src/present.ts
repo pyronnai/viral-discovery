@@ -43,8 +43,14 @@ export const RIGHTS_LABELS: Record<string, string> = {
   conflict: 'Needs review (merge conflict)',
 };
 
+/** breakout-v2 first, then v1.x names (older stored scores still render). */
 export const COMPONENT_LABELS: Record<string, string> = {
-  velocity: 'Velocity',
+  momentum: 'Momentum (pace × reach)',
+  pace: 'Pace since publish',
+  reach: 'Reach',
+  velocity: 'Measured velocity',
+  trend: 'Trend',
+  age: 'Age discount',
   acceleration: 'Acceleration',
   engagement: 'Engagement',
   freshness: 'Freshness',

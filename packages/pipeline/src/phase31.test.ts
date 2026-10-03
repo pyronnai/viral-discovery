@@ -157,8 +157,9 @@ describe('time-based score staleness', () => {
     const [a, b] = await scoresOf(cat);
     expect(b!.inputsHash).toBe(a!.inputsHash); // same evidence…
     expect(b!.value!).toBeLessThan(a!.value!); // …but older, so lower
-    expect((b!.components['freshness'] as { value: number }).value).toBeLessThan(
-      (a!.components['freshness'] as { value: number }).value,
+    // breakout-v2: the age discount on the inferred pace decays with time.
+    expect((b!.components['age'] as { value: number }).value).toBeLessThan(
+      (a!.components['age'] as { value: number }).value,
     );
     expect((await rescore(deps, { scope: { kind: 'stale' }, limit: 100 })).considered).toBe(0);
 
@@ -178,7 +179,7 @@ describe('time-based score staleness', () => {
     );
     const last = (await scoresOf(cat)).at(-1)!;
     expect(last.nextRescoreAt).toBeNull();
-    expect((last.components['freshness'] as { value: number }).value).toBeLessThanOrEqual(0.0501);
+    expect((last.components['age'] as { value: number }).value).toBeLessThanOrEqual(0.0501);
   });
 
   it('insufficient-evidence scores are never rescheduled by time alone', async () => {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SCORING_CONFIG } from './config.ts';
+import { BREAKOUT_V1_1_CONFIG as DEFAULT_SCORING_CONFIG } from './config.ts';
 import { evidenceFingerprint } from './fingerprint.ts';
 import { explainScore } from './explain.ts';
-import { percentile, scoreCandidate } from './score.ts';
+import { percentile, scoreCandidateV1 as scoreCandidate } from './score.ts';
 import type { CreatorHistoryVideo, ScoringInput, SightingInput, SnapshotInput } from './types.ts';
 
 // Fixed clock: no test depends on the wall clock.
