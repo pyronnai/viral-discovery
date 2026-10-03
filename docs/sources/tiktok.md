@@ -67,10 +67,22 @@ Documented API (docs.brightdata.com; dataset schema from `docs.brightdata.com/sc
 
 ### Scoring
 
-TikTok videos with views + publish time are scoreable from the first snapshot (pace, reach,
-then measured velocity). **breakout-v2 has no TikTok-specific scales yet**: TikTok currently
-falls back to the default (= YouTube) scale. A TikTok scale must be decided and approved
-before relying on TikTok ranking (see the open question below).
+TikTok videos with views + publish time are scored by breakout-v2 from the first snapshot (pace,
+reach, then measured velocity) with **TikTok's own fallback scales**: pace 50 → 200,000
+views/hour, reach 1,000 → 10,000,000 views. These are **initial, versioned fallbacks** (approved
+2026-10-03), not calibrated TikTok distributions; once enough TikTok v2 scores exist, the
+platform percentile is blended in (as for every platform). Without a publish time a TikTok
+video stays `insufficient_evidence` until a second snapshot measures velocity.
+
+### Open: is keyword discovery fresh enough? (must be measured before scheduling)
+
+The documented keyword discovery input is only `search_keyword`, `num_of_posts` (and
+`posts_to_not_include`, `country`). There is **no documented published-after filter, no
+newest/most-viewed sort, and no trending/viral ordering control**, so we do not know whether
+results skew toward old evergreen posts. The provider is deliberately not changed on
+speculation. The **first live Bright Data pilot must record the age distribution** of returned
+posts (e.g. share published within 24 h / 48 h / 7 d, median age) per query, and TikTok queries
+must **not** be added to the recurring scheduler until that shows usable freshness.
 
 ## Manual URL support ≠ automated discovery
 

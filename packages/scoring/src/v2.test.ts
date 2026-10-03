@@ -364,3 +364,84 @@ describe('breakout-v2: Viral Now evidence and revival', () => {
     expect(first('youtube', 200, 1 / 6).nextRescoreAt).toBeNull();
   });
 });
+
+describe('breakout-v2: TikTok fallback scales (initial, versioned)', () => {
+  const tiktok = (views: number, ageHours: number) => first('tiktok', views, ageHours);
+  const scaleOf = (r: ScoreResult, c: 'pace' | 'reach') =>
+    r.components[c].available ? r.components[c].details : {};
+
+  it("1. TikTok uses its own fallback, not YouTube's", () => {
+    const { scales } = DEFAULT_SCORING_CONFIG;
+    expect(scales['tiktok']).toBeDefined();
+    expect(scales['tiktok']).not.toEqual(scales['youtube']);
+    expect(scales['tiktok']!.pace.views[0]).toBeCloseTo(Math.log10(51), 10);
+    expect(scales['tiktok']!.pace.views[1]).toBeCloseTo(Math.log10(200_001), 10);
+    expect(scales['tiktok']!.reach.views[0]).toBeCloseTo(Math.log10(1_001), 10);
+    expect(scales['tiktok']!.reach.views[1]).toBeCloseTo(Math.log10(10_000_001), 10);
+    // Same counts, different scale ⇒ different normalized evidence.
+    const onTikTok = tiktok(100_000, 10);
+    const onYouTube = first('youtube', 100_000, 10);
+    expect(scaleOf(onTikTok, 'reach')['scale']).toEqual([...scales['tiktok']!.reach.views]);
+    expect(onTikTok.components.reach).not.toEqual(onYouTube.components.reach);
+    expect(value(onTikTok)).toBeLessThan(value(onYouTube));
+  });
+
+  it('2. a large, fast TikTok ranks strongly from its first snapshot', () => {
+    const r = tiktok(1_000_000, 10);
+    expect(r.state).toBe('provisional');
+    expect(r.viralNow?.evidence).toBe(true);
+    expect(r.score).toBeGreaterThanOrEqual(70);
+  });
+
+  it('3. a tiny fresh TikTok does not become viral from age alone', () => {
+    const r = tiktok(500, 1 / 6);
+    expect(r.state).toBe('insufficient_evidence');
+    expect(r.score).toBeNull();
+    expect(r.viralNow?.evidence).toBe(false);
+    expect(r.reasonCodes).toContain('REACH_BELOW_MINIMUM');
+  });
+
+  it('4. a moderately successful but slow TikTok scores below a genuinely fast breakout', () => {
+    const slow = tiktok(400_000, 40);
+    const fast = tiktok(1_000_000, 10);
+    expect(slow.state).toBe('provisional');
+    expect(value(slow)).toBeLessThan(value(fast));
+  });
+
+  it('5. no publish time and one snapshot stays insufficient evidence', () => {
+    const r = score({ platform: 'tiktok', ageHours: null, views: [[0, 2_000_000]] });
+    expect(r.state).toBe('insufficient_evidence');
+    expect(r.components.pace.available).toBe(false);
+  });
+
+  it('6. a second spaced snapshot moves TikTok toward measured velocity like other platforms', () => {
+    const base: Spec = { platform: 'tiktok', ageHours: 6, views: [[2, 400_000]] };
+    const firstOnly = scoreCandidate({ ...input(base), asOf: hoursAgo(2) });
+    const strong = score({
+      ...base,
+      views: [
+        [2, 400_000],
+        [0, 900_000],
+      ],
+    });
+    const weak = score({
+      ...base,
+      views: [
+        [2, 400_000],
+        [0, 410_000],
+      ],
+    });
+    expect(firstOnly.state).toBe('provisional');
+    expect(strong.state).toBe('scored');
+    const share = strong.components.momentum.available
+      ? strong.components.momentum.details['observedShare']
+      : null;
+    expect(share).toBeCloseTo(0.5, 1);
+    expect(value(strong)).toBeGreaterThanOrEqual(value(firstOnly));
+    expect(value(weak)).toBeLessThan(value(firstOnly));
+    // Reach stays in the measured core (same mechanics as every platform).
+    expect(
+      strong.components.momentum.available && strong.components.momentum.details['reach'],
+    ).toBe(strong.components.reach.available ? strong.components.reach.value : null);
+  });
+});

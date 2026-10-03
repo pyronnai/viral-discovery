@@ -121,6 +121,9 @@ export interface ScoringConfig {
  * a few hundred clip views is a small sample, while a clip with tens of thousands
  * competes with the best YouTube videos). Platforms without view counts (Bluesky)
  * are measured in likes: 1 like/h … 1k likes/h, reach 10 … 10k likes.
+ * TikTok: pace 50/h … 200k/h, reach 1k … 10M — INITIAL versioned fallbacks (approved
+ * 2026-10-03), not calibrated distributions; they give TikTok its own first-snapshot
+ * scale until enough TikTok scores exist for the platform percentile to take over.
  */
 const VIEWS_DEFAULT: PlatformScales = {
   pace: { views: [1, 4.7], likes: [0, 3] },
@@ -137,6 +140,10 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
     twitch: {
       pace: { views: [0.78, 3.7], likes: [0, 3] },
       reach: { views: [2, 5], likes: [1, 4] },
+    },
+    tiktok: {
+      pace: { views: [Math.log10(1 + 50), Math.log10(1 + 200_000)], likes: [0, 3] },
+      reach: { views: [Math.log10(1 + 1_000), Math.log10(1 + 10_000_000)], likes: [1, 4] },
     },
   },
   paceExponent: 0.6,

@@ -250,7 +250,8 @@ score    = 100 · softCap(core · trend · engagement · creator + propagationBo
 - **Count** is views; platforms without views (Bluesky) use likes on their own scale. Fallback
   scales (log10 of [lo, hi] → [0, 1]): YouTube pace 10/h…50k/h, reach 100…1M; Twitch pace
   5/h…5k/h, reach 100…100k (a high audience bar: a few hundred clip views is a small sample, a
-  clip with tens of thousands competes with the best YouTube videos); likes 1/h…1k/h, 10…10k.
+  clip with tens of thousands competes with the best YouTube videos); TikTok pace 50/h…200k/h,
+  reach 1k…10M (initial versioned fallbacks, not calibrated distributions); likes 1/h…1k/h, 10…10k.
 - **Platform percentile**: once ≥ 30 v2 scores exist for a platform (14-day window), the
   percentile of log pace is blended in, weight rising smoothly from 0 to at most 50 % at 100 —
   the documented scale always keeps ≥ 50 %, so the best item of a weak pool is not "viral" by
