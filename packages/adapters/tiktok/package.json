@@ -1,0 +1,22 @@
+{
+  "name": "@vd/adapter-tiktok",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vd/adapter-contract": "workspace:^",
+    "@vd/core": "workspace:^",
+    "@vd/url-identity": "workspace:^",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "pino": "^10.3.1",
+    "vitest": "^5.0.2"
+  }
+}

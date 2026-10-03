@@ -246,6 +246,28 @@ importers:
         specifier: ^5.0.2
         version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
 
+  packages/adapters/tiktok:
+    dependencies:
+      '@vd/adapter-contract':
+        specifier: workspace:^
+        version: link:../contract
+      '@vd/core':
+        specifier: workspace:^
+        version: link:../../core
+      '@vd/url-identity':
+        specifier: workspace:^
+        version: link:../../url-identity
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
+
   packages/adapters/twitch:
     dependencies:
       '@vd/adapter-contract':
@@ -279,6 +301,9 @@ importers:
       '@vd/adapter-manual-url':
         specifier: workspace:^
         version: link:../manual-url
+      '@vd/adapter-tiktok':
+        specifier: workspace:^
+        version: link:../tiktok
       '@vd/adapter-twitch':
         specifier: workspace:^
         version: link:../twitch
@@ -435,6 +460,9 @@ importers:
       '@vd/adapter-manual-url':
         specifier: workspace:^
         version: link:../adapters/manual-url
+      '@vd/adapter-tiktok':
+        specifier: workspace:^
+        version: link:../adapters/tiktok
       '@vd/adapter-twitch':
         specifier: workspace:^
         version: link:../adapters/twitch

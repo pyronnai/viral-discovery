@@ -13,6 +13,7 @@
     "@vd/adapter-bluesky": "workspace:^",
     "@vd/adapter-contract": "workspace:^",
     "@vd/adapter-manual-url": "workspace:^",
+    "@vd/adapter-tiktok": "workspace:^",
     "@vd/adapter-twitch": "workspace:^",
     "@vd/adapter-youtube": "workspace:^",
     "@vd/config": "workspace:^"

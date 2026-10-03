@@ -13,6 +13,7 @@ import {
 } from '@vd/adapter-contract';
 import { createBlueskyAdapter, blueskyManifest } from '@vd/adapter-bluesky';
 import { createManualUrlAdapter, manualUrlManifest } from '@vd/adapter-manual-url';
+import { createBrightDataProvider, createTikTokAdapter, tiktokManifest } from '@vd/adapter-tiktok';
 import { createTwitchAdapter, twitchManifest } from '@vd/adapter-twitch';
 import { createYouTubeAdapter, youtubeManifest } from '@vd/adapter-youtube';
 import type { AppConfig } from '@vd/config';
@@ -45,11 +46,25 @@ type AdapterConfig = Pick<
   | 'TWITCH_CLIENT_ID'
   | 'TWITCH_CLIENT_SECRET'
   | 'BLUESKY_APPVIEW_URL'
+  | 'TIKTOK_PUBLIC_PROVIDER'
+  | 'BRIGHTDATA_API_TOKEN'
+  | 'BRIGHTDATA_TIKTOK_DATASET_ID'
+  | 'BRIGHTDATA_API_URL'
+  | 'BRIGHTDATA_MAX_WAIT_SECONDS'
 >;
 
 interface Definition {
   manifest: AdapterManifest;
   create: (config: AdapterConfig, fetch: FetchLike | undefined) => SourceAdapter;
+  /** Missing variable names when they depend on configuration (default: manifest.requiredEnv). */
+  missingEnv?: (config: AdapterConfig) => string[];
+  /** Display name when it depends on configuration (e.g. the data provider). */
+  displayName?: (config: AdapterConfig) => string;
+}
+
+/** The public TikTok data provider: explicit, else Bright Data when its token is set. */
+export function tiktokProvider(config: AdapterConfig): 'brightdata' | 'none' {
+  return config.TIKTOK_PUBLIC_PROVIDER ?? (config.BRIGHTDATA_API_TOKEN ? 'brightdata' : 'none');
 }
 
 const DEFINITIONS: readonly Definition[] = [
@@ -83,6 +98,30 @@ const DEFINITIONS: readonly Definition[] = [
     manifest: manualUrlManifest,
     create: (_c, fetch) => createManualUrlAdapter(fetch ? { fetch } : {}),
   },
+  {
+    manifest: tiktokManifest,
+    // Provider-neutral adapter; the provider is chosen (and credentialed) here only.
+    create: (c, fetch) =>
+      createTikTokAdapter({
+        provider: createBrightDataProvider({
+          token: c.BRIGHTDATA_API_TOKEN ?? '',
+          ...(c.BRIGHTDATA_TIKTOK_DATASET_ID ? { datasetId: c.BRIGHTDATA_TIKTOK_DATASET_ID } : {}),
+          ...(c.BRIGHTDATA_API_URL ? { baseUrl: c.BRIGHTDATA_API_URL } : {}),
+          ...(c.BRIGHTDATA_MAX_WAIT_SECONDS
+            ? { maxWaitMs: c.BRIGHTDATA_MAX_WAIT_SECONDS * 1000 }
+            : {}),
+          ...(fetch ? { fetch } : {}),
+        }),
+      }),
+    missingEnv: (c) => {
+      if (c.TIKTOK_PUBLIC_PROVIDER === 'none') return ['TIKTOK_PUBLIC_PROVIDER=brightdata'];
+      return c.BRIGHTDATA_API_TOKEN ? [] : ['BRIGHTDATA_API_TOKEN'];
+    },
+    displayName: (c) =>
+      tiktokProvider(c) === 'brightdata'
+        ? 'TikTok public data via Bright Data'
+        : 'TikTok public data (no provider configured)',
+  },
 ];
 
 /** Adapters documented but not implemented (access-gated). Listed so tools can say why. */
@@ -100,15 +139,17 @@ export function buildAdapterRegistry(
 ): WiredAdapters {
   const registry = new AdapterRegistry();
   const statuses: AdapterStatus[] = [];
-  for (const { manifest, create } of DEFINITIONS) {
-    const missingEnv = manifest.requiredEnv.filter(
-      (name) => !(config as Record<string, string | undefined>)[name],
-    );
+  for (const { manifest, create, missingEnv: missingFor, displayName } of DEFINITIONS) {
+    const missingEnv = missingFor
+      ? missingFor(config)
+      : manifest.requiredEnv.filter(
+          (name) => !(config as Record<string, string | number | undefined>)[name],
+        );
     const configured = missingEnv.length === 0;
     if (configured) registry.register(create(config, options.fetch));
     statuses.push({
       id: manifest.id,
-      displayName: manifest.displayName,
+      displayName: displayName ? displayName(config) : manifest.displayName,
       platform: manifest.platform,
       capabilities: manifest.capabilities,
       referencePlatforms: manifest.referencePlatforms,

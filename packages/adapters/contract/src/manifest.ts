@@ -21,6 +21,7 @@ export const AccessMethodSchema = z.enum([
   'official_feed', // documented public feed (e.g. RSS/Atom published by the platform)
   'oembed', // documented oEmbed endpoint
   'manual', // human-supplied input
+  'third_party_provider', // a documented commercial data API for public data (e.g. Bright Data)
 ]);
 export type AccessMethod = z.infer<typeof AccessMethodSchema>;
 

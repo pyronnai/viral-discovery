@@ -416,50 +416,103 @@ export async function enrichFromCanonical(
   deps: PipelineDeps,
   video: { id: string; platform: string; canonicalUrl: string },
 ): Promise<EnrichmentResult> {
-  const { platform } = video;
+  const [result] = await enrichBatch(deps, video.platform, [video]);
+  return result ?? { status: 'no_adapter', message: `no configured ${video.platform} adapter` };
+}
+
+/**
+ * Looks up videos of ONE platform on that platform's adapter — one batch call when
+ * the adapter offers lookupUrls (e.g. a per-job data provider), else one lookup per
+ * video — and ingests each answer as an authoritative observation.
+ */
+async function enrichBatch(
+  deps: PipelineDeps,
+  platform: string,
+  batch: { id: string; platform: string; canonicalUrl: string }[],
+): Promise<EnrichmentResult[]> {
   const adapter = canonicalAdapter(deps.registry, platform);
   if (!adapter?.lookupUrl) {
-    return {
-      status: 'no_adapter',
+    return batch.map(() => ({
+      status: 'no_adapter' as const,
       message: `no configured ${platform} adapter; stored identity and whatever the discovering source provides`,
-    };
+    }));
   }
   const adapterId = adapter.manifest.id;
   const now = deps.now ?? (() => new Date());
   const source = await ensureSource(deps.db, adapter.manifest);
   const quota = await loadQuotaBudget(deps.db, source, now(), adapter.manifest);
+  const ctx = adapterContext(deps, adapter, quota);
+  const failed = (err: unknown): EnrichmentResult => ({
+    status: 'failed',
+    adapterId,
+    message: errorMessage(err),
+  });
   try {
-    const raw = await adapter.lookupUrl(video.canonicalUrl, adapterContext(deps, adapter, quota));
-    if (!raw) {
-      return {
-        status: 'not_found',
-        adapterId,
-        message: `${platform} did not return this video (removed, private, or wrong id)`,
-      };
+    let raws: (RawItem | null | Error)[];
+    if (adapter.lookupUrls) {
+      try {
+        raws = await adapter.lookupUrls(
+          batch.map((v) => v.canonicalUrl),
+          ctx,
+        );
+      } catch (err) {
+        return batch.map(() => failed(err));
+      }
+    } else {
+      const lookup = adapter.lookupUrl.bind(adapter);
+      raws = [];
+      for (const video of batch) {
+        try {
+          raws.push(await lookup(video.canonicalUrl, ctx));
+        } catch (err) {
+          raws.push(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
     }
-    const normalized = safeNormalize(adapter, raw);
-    if (!normalized.ok) {
-      return { status: 'failed', adapterId, message: normalized.errors.join('; ') };
+    const results: EnrichmentResult[] = [];
+    for (const [i, video] of batch.entries()) {
+      const raw = raws[i];
+      if (raw instanceof Error) {
+        results.push(failed(raw));
+        continue;
+      }
+      if (!raw) {
+        results.push({
+          status: 'not_found',
+          adapterId,
+          message: `${platform} did not return this video (removed, private, or wrong id)`,
+        });
+        continue;
+      }
+      const normalized = safeNormalize(adapter, raw);
+      if (!normalized.ok) {
+        results.push({ status: 'failed', adapterId, message: normalized.errors.join('; ') });
+        continue;
+      }
+      try {
+        const result = await ingestOne(deps.db, {
+          adapter,
+          source,
+          runId: null,
+          raw,
+          video: normalized.value,
+          writeSighting: false,
+          writeSnapshot: true,
+        });
+        results.push(
+          result.videoId === video.id
+            ? { status: 'enriched', adapterId, snapshot: result.snapshot }
+            : {
+                status: 'failed',
+                adapterId,
+                message: 'canonical lookup resolved to a different video',
+              },
+        );
+      } catch (err) {
+        results.push(failed(err));
+      }
     }
-    const result = await ingestOne(deps.db, {
-      adapter,
-      source,
-      runId: null,
-      raw,
-      video: normalized.value,
-      writeSighting: false,
-      writeSnapshot: true,
-    });
-    if (result.videoId !== video.id) {
-      return {
-        status: 'failed',
-        adapterId,
-        message: 'canonical lookup resolved to a different video',
-      };
-    }
-    return { status: 'enriched', adapterId, snapshot: result.snapshot };
-  } catch (err) {
-    return { status: 'failed', adapterId, message: errorMessage(err) };
+    return results;
   } finally {
     await recordApiUsage(deps.db, source.id, usageDate(now()), quota.usage(), quota.requests());
   }
@@ -494,13 +547,26 @@ export async function enrichReferences(
     noAdapter: 0,
     results: [],
   };
+  const byPlatform = new Map<string, typeof candidates>();
   for (const video of candidates) {
-    const result = await enrichFromCanonical(deps, video);
-    summary.results.push({ videoId: video.id, platform: video.platform, ...result });
-    if (result.status === 'enriched') summary.enriched += 1;
-    else if (result.status === 'not_found') summary.notFound += 1;
-    else if (result.status === 'failed') summary.failed += 1;
-    else summary.noAdapter += 1;
+    const list = byPlatform.get(video.platform) ?? [];
+    list.push(video);
+    byPlatform.set(video.platform, list);
+  }
+  for (const [platform, batch] of byPlatform) {
+    const results = await enrichBatch(deps, platform, batch);
+    for (const [i, video] of batch.entries()) {
+      const result = results[i] ?? {
+        status: 'failed' as const,
+        adapterId: '?',
+        message: 'no result',
+      };
+      summary.results.push({ videoId: video.id, platform: video.platform, ...result });
+      if (result.status === 'enriched') summary.enriched += 1;
+      else if (result.status === 'not_found') summary.notFound += 1;
+      else if (result.status === 'failed') summary.failed += 1;
+      else summary.noAdapter += 1;
+    }
   }
   return summary;
 }

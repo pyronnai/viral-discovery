@@ -48,7 +48,7 @@ re-host third-party media, and it does not depend on any generative-video tool.
 | `@vd/url-resolution`   | Network step above it: allowlisted, bounded expansion of TikTok short links (no generic redirect following).        | url-identity           |
 | `@vd/scoring`          | Pure, deterministic breakout score v1 (components, confidence, explanation, evidence fingerprint). No DB, no clock. | core                   |
 | `@vd/adapter-contract` | `SourceAdapter` interface, manifest, normalized schemas, quota budget, registry, HTTP helper, contract test kit.    | core, config           |
-| `@vd/adapter-*`        | `youtube`, `twitch`, `bluesky`, `manual-url`: one platform/access method each.                                      | contract, url-identity |
+| `@vd/adapter-*`        | `youtube`, `twitch`, `bluesky`, `manual-url`, `tiktok` (provider-neutral; Bright Data first): one platform each.    | contract, url-identity |
 | `@vd/adapter-wiring`   | **The only place adapters are instantiated**; registers each one only if its own env vars are set.                  | adapters               |
 | `@vd/db`               | Drizzle schema, client, migrations, health check.                                                                   | core, config           |
 | `@vd/pipeline`         | Platform-agnostic ingestion: normalize → identity → creator/video upsert → sighting → snapshot → run stats.         | contract, db           |

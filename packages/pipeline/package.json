@@ -24,6 +24,7 @@
     "@electric-sql/pglite": "^0.5.8",
     "@vd/adapter-bluesky": "workspace:^",
     "@vd/adapter-manual-url": "workspace:^",
+    "@vd/adapter-tiktok": "workspace:^",
     "@vd/adapter-twitch": "workspace:^",
     "@vd/adapter-youtube": "workspace:^",
     "pino": "^10.3.1",

@@ -52,6 +52,11 @@ export interface SourceAdapter {
   discoverFeed?(req: DiscoveryRequest, ctx: AdapterContext): AsyncIterable<RawItem>;
   /** capability: discovery.url — returns null if the URL isn't this adapter's or isn't reachable. */
   lookupUrl?(url: string, ctx: AdapterContext): Promise<RawItem | null>;
+  /**
+   * Optional batch form of lookupUrl (same capability) for adapters whose source is
+   * cheaper per batch than per URL. Results are positional: one entry per input URL.
+   */
+  lookupUrls?(urls: readonly string[], ctx: AdapterContext): Promise<(RawItem | null)[]>;
   /** capability: metrics.refresh */
   refreshMetrics?(refs: readonly VideoRef[], ctx: AdapterContext): Promise<MetricRefreshResult[]>;
   /** capability: creator.enrich */
