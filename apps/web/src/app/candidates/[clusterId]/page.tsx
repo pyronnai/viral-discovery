@@ -30,6 +30,7 @@ import {
   Sparkline,
 } from '../../../components/Evidence.tsx';
 import { InboxActions } from '../../../components/InboxActions.tsx';
+import { MediaPreview } from '../../../components/MediaPreview.tsx';
 import {
   RepresentationList,
   Representations,
@@ -38,6 +39,8 @@ import {
 import { ReviewControls } from '../../../components/ReviewControls.tsx';
 import { RightsForm } from '../../../components/RightsForm.tsx';
 import { Thumbnail } from '../../../components/Thumbnail.tsx';
+import { describeDownload } from '../../../lib/download.ts';
+import { mediaDeps } from '../../../lib/media-server.ts';
 import { getContext } from '../../../lib/server.ts';
 
 export const dynamic = 'force-dynamic';
@@ -89,6 +92,8 @@ export default async function CandidatePage({
   const versionPlatform = new Map(
     detail.versions.map((v) => [v.videoId, platformName(v.platform)]),
   );
+  // Validated (scheme, path, host, type, size) — not just "a media_assets row exists".
+  const download = await describeDownload(mediaDeps(), clusterId);
 
   return (
     <article className="detail">
@@ -108,11 +113,18 @@ export default async function CandidatePage({
           {card.availabilityNote ? <p className="warn">{card.availabilityNote}</p> : null}
           <StateBadges inbox={card.inbox} conflict={card.conflicts.review} />
           <Representations
+            clusterId={clusterId}
             representations={card.representations}
             canonicalUrl={card.canonicalUrl}
             platform={card.platform}
             access={card.access}
+            download={
+              download.available
+                ? { available: true, videoId: download.videoId, filename: download.filename }
+                : { available: false }
+            }
           />
+          <MediaPreview clusterId={clusterId} info={download} />
           <InboxActions clusterId={clusterId} state={card.inbox} withNote />
           {card.inbox.obtained ? (
             <p className="small">
@@ -197,11 +209,17 @@ export default async function CandidatePage({
           </div>
           <div>
             <dt>Media</dt>
-            <dd>{card.access.label}</dd>
+            <dd>
+              {download.available
+                ? `${card.access.label} · ${download.contentType} · ${download.filename}`
+                : card.access.mediaDownload
+                  ? `${card.access.label} · not servable: ${download.reason}`
+                  : card.access.label}
+            </dd>
           </div>
         </dl>
         <h3>Available representations</h3>
-        <RepresentationList representations={card.representations} />
+        <RepresentationList clusterId={clusterId} representations={card.representations} />
       </section>
 
       <section>

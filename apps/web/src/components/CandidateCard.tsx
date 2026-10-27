@@ -115,6 +115,7 @@ export function CandidateCard({ card }: { card: CardView }) {
           {card.availabilityNote ? <span className="warn">{card.availabilityNote}</span> : null}
         </div>
         <Representations
+          clusterId={card.clusterId}
           representations={card.representations}
           canonicalUrl={card.canonicalUrl}
           platform={card.platform}

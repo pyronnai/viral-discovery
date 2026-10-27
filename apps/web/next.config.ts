@@ -2,8 +2,9 @@ import type { NextConfig } from 'next';
 
 /**
  * Internal, single-user review dashboard. Server-rendered from the database; it
- * never proxies or downloads source media (thumbnails load directly from the
- * platform's CDN, "Open original" links to the canonical URL).
+ * never rips source media (thumbnails load directly from the platform's CDN,
+ * "Open original" links to the canonical URL). The only media it streams are
+ * official/authorized assets recorded in media_assets (see lib/download.ts).
  */
 const config: NextConfig = {
   poweredByHeader: false,

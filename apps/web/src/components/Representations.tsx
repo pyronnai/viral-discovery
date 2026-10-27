@@ -1,29 +1,44 @@
 import type { CardView } from '@vd/review';
+import { DownloadButton, downloadHref } from './DownloadButton.tsx';
 
 /**
- * Open original, prominently, plus every confirmed representation as an alternate
- * source. A source link is never presented as a download: "download" appears only
- * for an official/authorized asset.
+ * [ Open original ] [ Download ] plus every confirmed representation as an
+ * alternate source. A source link is never presented as a download: the Download
+ * button works only for an official/authorized asset (media_assets), otherwise it
+ * reads "Download unavailable".
  */
 export function Representations({
+  clusterId,
   representations,
   canonicalUrl,
   platform,
   access,
   compact,
+  download,
 }: {
+  clusterId: string;
   representations: CardView['representations'];
   canonicalUrl: string;
   platform: string;
   access: CardView['access'];
   compact?: boolean;
+  /** Detail page: validated download (overrides the feed's cheaper availability flag). */
+  download?: { available: boolean; videoId?: string | null; filename?: string | null };
 }) {
   const alternates = representations.filter((r) => !r.isRepresentative);
+  const available = download ? download.available : access.mediaDownload;
   return (
     <div className={compact ? 'reps reps-compact' : 'reps'}>
       <a className="btn btn-open" href={canonicalUrl} target="_blank" rel="noopener noreferrer">
         ▶ Open original on {platform} ↗
       </a>
+      <DownloadButton
+        clusterId={clusterId}
+        available={available}
+        videoId={download?.videoId ?? null}
+        filename={download?.filename ?? null}
+        compact={compact ?? false}
+      />
       {alternates.length ? (
         <span className="reps-alt">
           <span className="k">Also on</span>
@@ -47,8 +62,10 @@ export function Representations({
 
 /** Full list for the detail page: "Available representations". */
 export function RepresentationList({
+  clusterId,
   representations,
 }: {
+  clusterId: string;
   representations: CardView['representations'];
 }) {
   return (
@@ -66,6 +83,14 @@ export function RepresentationList({
             {' '}
             · {r.mediaDownload ? 'official download available' : 'source link only'}
           </span>
+          {r.mediaDownload ? (
+            <>
+              {' '}
+              <a href={downloadHref(clusterId, r.videoId)} download className="small">
+                ⬇ Download
+              </a>
+            </>
+          ) : null}
         </li>
       ))}
     </ul>

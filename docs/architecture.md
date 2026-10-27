@@ -14,8 +14,10 @@ editing, compilation structure, captions/hooks and publishing **externally**. Co
 planning, script/hook generation, editing and publishing are not part of the product (see
 "Out of scope").
 
-It **links to and analyzes** public metadata. It does **not** download, rip, or
-re-host third-party media, and it does not depend on any generative-video tool.
+It **links to and analyzes** public metadata. It does **not** rip or re-host third-party
+media, and it does not depend on any generative-video tool. The only media it ever serves
+are official/authorized assets explicitly recorded in `media_assets` (see "Source access vs
+media download").
 
 ## Pipeline
 
@@ -509,9 +511,20 @@ the value sort after rows with it — and every sort has its own keyset cursor.
   content stays separate but is flagged on its card.
 
 **Source access vs media download.** Every candidate has a source link (canonical URL, plus each
-confirmed representation). A **download** is shown only when a `media_assets` row exists — an
-asset explicitly provided by an official/authorized API or rights holder (none of today's
-adapters provide one; the table is the extension point). Player/CDN URLs are never extracted.
+confirmed representation). The **Download** button works only when a `media_assets` row exists —
+an asset explicitly provided by an official/authorized API, the rights holder, the creator, or a
+file the operator already holds (none of today's adapters write one; the table is the extension
+point). Otherwise the card shows "Download unavailable". Player/CDN URLs are never extracted.
+`GET /api/candidates/:id/download` (`apps/web/src/lib/download.ts`) picks the first unexpired
+asset (representative version first, `?video=` narrows), validates its url — `local:<relative>`
+or `file://` strictly inside `MEDIA_ASSETS_DIR` (realpath-checked, no traversal/symlink escape),
+or `https://` to a public, optionally allowlisted host (`MEDIA_ASSET_HOSTS`), no credentials in
+the url, redirects re-validated — checks the media type (mp4/m4v/webm/mov) and size
+(`MEDIA_ASSET_MAX_BYTES`), then streams it with `Content-Disposition: attachment` and a
+sanitized `creator-short-title-video-id.ext` filename, forwarding no cookies or headers in either
+direction. A served download records an `obtained` acquisition event for that representation;
+nothing is recorded for a missing or invalid asset. `/media` serves the same asset inline (with
+Range support) for the native player on the detail page and records nothing.
 
 **Bulk actions** (`bulkApply`): save, obtained, used, reject on up to 200 selected clusters;
 merged-away ids resolve to their survivor and collapse, each item is idempotent, failures are
@@ -564,8 +577,8 @@ needs only `DATABASE_URL` — no source-API or model credentials to render store
   breakdown (unavailable components say so, with the reason), AI summary.
 - **Public propagation vs provenance** in the UI comes from the same adapter-declared
   `sightingRole` as scoring (`splitSources`); unknown adapters render as provenance.
-- **No media handling:** no proxying, downloading, or embeds; "Open original" links to the
-  canonical URL.
+- **No media ripping:** no player/CDN URL extraction, no embeds; "Open original" links to the
+  canonical URL. The dashboard streams only `media_assets` rows (below).
 
 ### Review workflow (cluster-level)
 

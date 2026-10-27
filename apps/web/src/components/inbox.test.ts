@@ -160,6 +160,7 @@ describe('inbox components', () => {
     };
     const markup = html(
       createElement(Representations, {
+        clusterId: 'c',
         representations: reps,
         canonicalUrl: 'https://y.test/1',
         platform: 'YouTube',
@@ -168,13 +169,17 @@ describe('inbox components', () => {
     );
     expect(markup).toContain('Source link only (no official download)');
     expect(markup).not.toMatch(/download available/);
-    const list = html(createElement(RepresentationList, { representations: reps }));
+    expect(markup).toContain('Download unavailable');
+    expect(markup).toContain('No downloadable media asset is available for this video.');
+    expect(markup).not.toContain('/api/candidates/c/download');
+    const list = html(createElement(RepresentationList, { clusterId: 'c', representations: reps }));
     expect(list).toContain('YouTube');
     expect(list).toContain('Twitch');
     expect(list.match(/source link only/g)).toHaveLength(2);
     expect(
       html(
         createElement(RepresentationList, {
+          clusterId: 'c',
           representations: [{ ...reps[0]!, mediaDownload: true }],
         }),
       ),

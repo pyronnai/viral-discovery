@@ -953,3 +953,37 @@ code {
   align-items: baseline;
   margin: 0.25rem 0;
 }
+
+/* ── media downloads ─────────────────────────────────────────────────────── */
+.btn-download {
+  background: var(--info);
+  border-color: var(--info);
+  color: #111;
+  font-weight: 600;
+}
+.btn-download:hover {
+  filter: brightness(1.08);
+}
+.btn-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.download-unavailable {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.download-note-compact {
+  font-size: 11px;
+}
+.media-preview {
+  margin: 12px 0;
+}
+.media-preview video {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  background: #000;
+  border-radius: 8px;
+}

@@ -5,7 +5,7 @@
 The system finds and prioritizes candidate funny/viral videos: discover → rank (deterministic
 breakout score) → classify → deduplicate across platforms → review → save → open the
 original → track what you obtained and already used. **You** do the editing, compilation,
-captions and publishing externally — the system never downloads media, plans compilations,
+captions and publishing externally — the system never rips media, plans compilations,
 or publishes anything.
 
 **Status: Phase 5 — daily viral-video inbox.** Sources: YouTube, Twitch, Bluesky, and manual
@@ -103,7 +103,9 @@ pnpm cli duplicates explain <videoA> <videoB>   # evidence for one pair, stores 
 - Quick category chips (funny, animals, fails, reactions, memes, unexpected), filters (platform,
   minimum score, freshness, creator, rights) and sorts (virality, newest, fastest growing,
   most viewed, recently discovered) — all in the URL.
-- Per card: **▶ Open original** (plus "Also on" links for confirmed reposts on other
+- Per card: **▶ Open original** · **⬇ Download** (a real browser file download, only when an
+  official/authorized `media_assets` row exists — otherwise "Download unavailable"; see
+  `MEDIA_ASSETS_DIR` / `MEDIA_ASSET_HOSTS` in `.env.example`) (plus "Also on" links for confirmed reposts on other
   platforms), ☆ Save, ⬇ Obtained, Used; Approve/Reject and Details as secondary actions.
 - Select several cards for bulk Save / Obtained / Used / Reject (broad actions ask first), and
   export the selection or the current view as CSV/JSON — metadata and links only.

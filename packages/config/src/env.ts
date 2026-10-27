@@ -53,6 +53,25 @@ export const EnvSchema = z.object({
     .string()
     .min(16, 'DASHBOARD_ACCESS_TOKEN must be at least 16 characters')
     .optional(),
+
+  // ── media assets (dashboard downloads of official/authorized assets only) ─
+  /**
+   * Directory holding local media assets referenced by `media_assets` rows with a
+   * `local:` or `file://` url. Unset = local assets are never served.
+   */
+  MEDIA_ASSETS_DIR: z.string().min(1).optional(),
+  /** Largest asset the dashboard will stream, in bytes (default 1 GiB). */
+  MEDIA_ASSET_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(64 * 1024 ** 3)
+    .default(1024 ** 3),
+  /**
+   * Optional comma-separated allowlist of hosts for remote (https) media assets.
+   * Unset = any public https host named by a media_assets row (never private networks).
+   */
+  MEDIA_ASSET_HOSTS: z.string().min(1).optional(),
 });
 
 /** Names of variables that hold secrets. Never print their values. */
