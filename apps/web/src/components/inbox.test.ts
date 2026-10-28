@@ -20,6 +20,7 @@ vi.mock('../lib/server.ts', () => ({
 const { CandidateCard } = await import('./CandidateCard.tsx');
 const { InboxActions } = await import('./InboxActions.tsx');
 const { Representations, RepresentationList, StateBadges } = await import('./Representations.tsx');
+const { DownloadMenu } = await import('./DownloadMenu.tsx');
 const { SourceHealthTable } = await import('./SourceHealth.tsx');
 const { GET } = await import('../app/export/route.ts');
 
@@ -164,13 +165,13 @@ describe('inbox components', () => {
         representations: reps,
         canonicalUrl: 'https://y.test/1',
         platform: 'YouTube',
+        platformKey: 'youtube',
         access,
       }),
     );
     expect(markup).toContain('Source link only (no official download)');
     expect(markup).not.toMatch(/download available/);
-    expect(markup).toContain('Download unavailable');
-    expect(markup).toContain('No downloadable media asset is available for this video.');
+    expect(markup).toContain('⬇ Download ▾');
     expect(markup).not.toContain('/api/candidates/c/download');
     const list = html(createElement(RepresentationList, { clusterId: 'c', representations: reps }));
     expect(list).toContain('YouTube');
@@ -184,6 +185,131 @@ describe('inbox components', () => {
         }),
       ),
     ).toContain('official download available');
+  });
+
+  it('download menu: TikTok → SnapTik handoff, copy, open original, disclaimer', () => {
+    const url = 'https://www.tiktok.com/@someone/video/7411111111111111111';
+    const markup = html(
+      createElement(DownloadMenu, {
+        clusterId: 'c',
+        platformKey: 'tiktok',
+        platformName: 'TikTok',
+        canonicalUrl: url,
+        asset: { available: false },
+        defaultOpen: true,
+      }),
+    );
+    expect(markup).toContain('aria-haspopup="menu"');
+    expect(markup).toContain('aria-expanded="true"');
+    expect(markup).toContain('role="menu"');
+    expect(markup).toContain('SnapTik ↗');
+    expect(markup).toContain('href="https://snaptik.app/"');
+    expect(markup).not.toContain('SnapTube');
+    expect(markup).not.toContain('SnapInsta');
+    expect(markup).toContain('Copy original URL');
+    expect(markup).toContain(`<span class="small muted">${url}</span>`);
+    expect(markup).toContain('Open original on TikTok ↗');
+    expect(markup).toContain('Downloads are handled by external services.');
+    expect(markup).toContain('external service');
+    expect(markup).not.toContain('No configured external downloader');
+    // Every link that leaves the dashboard is a safe new-tab link; the external href is the
+    // provider's site only (the candidate URL is never part of it).
+    const external = [...markup.matchAll(/<a [^>]*target="_blank"[^>]*>/g)].map((m) => m[0]);
+    expect(external.length).toBeGreaterThanOrEqual(2);
+    for (const a of external) expect(a).toContain('rel="noopener noreferrer"');
+    expect(markup).not.toContain('https://snaptik.app/?');
+    expect(markup).not.toMatch(/snaptik\.app\/[^"]/);
+    // Closed by default: nothing but the trigger is rendered.
+    const closed = html(
+      createElement(DownloadMenu, {
+        clusterId: 'c',
+        platformKey: 'tiktok',
+        platformName: 'TikTok',
+        canonicalUrl: url,
+      }),
+    );
+    expect(closed).toContain('aria-expanded="false"');
+    expect(closed).not.toContain('snaptik.app');
+  });
+
+  it('download menu: Instagram → SnapInsta; unsupported platforms invent nothing', () => {
+    const insta = html(
+      createElement(DownloadMenu, {
+        clusterId: 'c',
+        platformKey: 'instagram',
+        platformName: 'Instagram',
+        canonicalUrl: 'https://www.instagram.com/reel/Cabc123/',
+        defaultOpen: true,
+      }),
+    );
+    expect(insta).toContain('SnapInsta ↗');
+    expect(insta).toContain('href="https://snapinsta.to/"');
+    expect(insta).not.toContain('SnapTik');
+    for (const [key, name] of [
+      ['youtube', 'YouTube'],
+      ['twitch', 'Twitch'],
+      ['bluesky', 'Bluesky'],
+    ]) {
+      const m = html(
+        createElement(DownloadMenu, {
+          clusterId: 'c',
+          platformKey: key!,
+          platformName: name!,
+          canonicalUrl: 'https://example.test/v/1',
+          defaultOpen: true,
+        }),
+      );
+      expect(m, key).toContain('No configured external downloader for this platform.');
+      expect(m, key).not.toMatch(/snaptik|snapinsta|snaptube/i);
+      expect(m, key).toContain('Copy original URL');
+      expect(m, key).toContain(`Open original on ${name} ↗`);
+    }
+    // An official asset adds the direct file download at the top of the menu.
+    const withAsset = html(
+      createElement(DownloadMenu, {
+        clusterId: 'c',
+        platformKey: 'youtube',
+        platformName: 'YouTube',
+        canonicalUrl: 'https://example.test/v/1',
+        asset: { available: true, videoId: 'v1', filename: 'a.mp4' },
+        defaultOpen: true,
+      }),
+    );
+    expect(withAsset).toContain('href="/api/candidates/c/download?video=v1"');
+    expect(withAsset).toContain('Download file');
+    expect(withAsset).not.toContain('No configured external downloader');
+  });
+
+  it('card and detail page share one provider mapping', async () => {
+    const tiktok = await cardFor(seeded.insufficient.clusterId);
+    expect(tiktok.platformKey).toBe('tiktok');
+    const card = html(createElement(CandidateCard, { card: tiktok }));
+    const detail = html(
+      createElement(Representations, {
+        clusterId: tiktok.clusterId,
+        representations: tiktok.representations,
+        canonicalUrl: tiktok.canonicalUrl,
+        platform: tiktok.platform,
+        platformKey: tiktok.platformKey,
+        access: tiktok.access,
+        download: { available: false },
+      }),
+    );
+    // Both render the same DownloadMenu trigger; the mapping lives in lib/downloaders.ts only.
+    for (const m of [card, detail]) {
+      expect(m).toContain('⬇ Download ▾');
+      expect(m).toContain('aria-haspopup="menu"');
+    }
+    const source = (await import('node:fs')).readFileSync(
+      new URL('./Representations.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(source).not.toMatch(/snaptik|snapinsta|snaptube/i);
+    const cardSource = (await import('node:fs')).readFileSync(
+      new URL('./CandidateCard.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(cardSource).not.toMatch(/snaptik|snapinsta|snaptube|downloaders/i);
   });
 
   it('state badges', () => {

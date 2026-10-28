@@ -103,9 +103,10 @@ pnpm cli duplicates explain <videoA> <videoB>   # evidence for one pair, stores 
 - Quick category chips (funny, animals, fails, reactions, memes, unexpected), filters (platform,
   minimum score, freshness, creator, rights) and sorts (virality, newest, fastest growing,
   most viewed, recently discovered) — all in the URL.
-- Per card: **▶ Open original** · **⬇ Download** (a real browser file download, only when an
-  official/authorized `media_assets` row exists — otherwise "Download unavailable"; see
-  `MEDIA_ASSETS_DIR` / `MEDIA_ASSET_HOSTS` in `.env.example`) (plus "Also on" links for confirmed reposts on other
+- Per card: **▶ Open original** · **⬇ Download ▾** (menu: the official/authorized file when a
+  `media_assets` row exists; a clipboard + new-tab handoff to a verified external downloader for
+  the platform — TikTok → SnapTik, Instagram → SnapInsta, configured in
+  `apps/web/src/lib/downloaders.ts`; Copy original URL) (plus "Also on" links for confirmed reposts on other
   platforms), ☆ Save, ⬇ Obtained, Used; Approve/Reject and Details as secondary actions.
 - Select several cards for bulk Save / Obtained / Used / Reject (broad actions ask first), and
   export the selection or the current view as CSV/JSON — metadata and links only.

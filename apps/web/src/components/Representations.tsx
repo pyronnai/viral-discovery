@@ -1,17 +1,18 @@
 import type { CardView } from '@vd/review';
-import { DownloadButton, downloadHref } from './DownloadButton.tsx';
+import { DownloadMenu, downloadHref, type OfficialAsset } from './DownloadMenu.tsx';
 
 /**
- * [ Open original ] [ Download ] plus every confirmed representation as an
- * alternate source. A source link is never presented as a download: the Download
- * button works only for an official/authorized asset (media_assets), otherwise it
- * reads "Download unavailable".
+ * [ Open original ] [ Download ▾ ] plus every confirmed representation as an
+ * alternate source. A source link is never presented as a download: the menu's
+ * "Download file" needs an official/authorized asset (media_assets); external
+ * downloaders are a clipboard + new-tab handoff from the central provider config.
  */
 export function Representations({
   clusterId,
   representations,
   canonicalUrl,
   platform,
+  platformKey,
   access,
   compact,
   download,
@@ -20,24 +21,25 @@ export function Representations({
   representations: CardView['representations'];
   canonicalUrl: string;
   platform: string;
+  platformKey: string;
   access: CardView['access'];
   compact?: boolean;
   /** Detail page: validated download (overrides the feed's cheaper availability flag). */
-  download?: { available: boolean; videoId?: string | null; filename?: string | null };
+  download?: OfficialAsset;
 }) {
   const alternates = representations.filter((r) => !r.isRepresentative);
-  const available = download ? download.available : access.mediaDownload;
+  const asset: OfficialAsset = download ?? { available: access.mediaDownload };
   return (
     <div className={compact ? 'reps reps-compact' : 'reps'}>
       <a className="btn btn-open" href={canonicalUrl} target="_blank" rel="noopener noreferrer">
         ▶ Open original on {platform} ↗
       </a>
-      <DownloadButton
+      <DownloadMenu
         clusterId={clusterId}
-        available={available}
-        videoId={download?.videoId ?? null}
-        filename={download?.filename ?? null}
-        compact={compact ?? false}
+        platformKey={platformKey}
+        platformName={platform}
+        canonicalUrl={canonicalUrl}
+        asset={asset}
       />
       {alternates.length ? (
         <span className="reps-alt">

@@ -117,6 +117,7 @@ export default async function CandidatePage({
             representations={card.representations}
             canonicalUrl={card.canonicalUrl}
             platform={card.platform}
+            platformKey={card.platformKey}
             access={card.access}
             download={
               download.available

@@ -526,6 +526,20 @@ direction. A served download records an `obtained` acquisition event for that re
 nothing is recorded for a missing or invalid asset. `/media` serves the same asset inline (with
 Range support) for the native player on the detail page and records nothing.
 
+**External downloader handoff.** The **Download ▾** menu (card and detail page, same
+`DownloadMenu`) also lists external downloader services from one central config,
+`apps/web/src/lib/downloaders.ts` (name, verified website, supported canonical platforms,
+instructions, documented prefill = none, verification evidence and date). Choosing one copies the
+candidate's canonical URL to the clipboard and opens the service's website in a new tab
+(`noopener noreferrer`); the user pastes the link there. The external href is always the
+configured website — no candidate value can reach it — and nothing passes through the backend.
+If the clipboard is unavailable the site still opens and the URL is shown with a Copy button.
+Platforms without a verified web tool get "No configured external downloader for this platform."
+plus Copy original URL / Open original. Mapping today: TikTok → SnapTik (`snaptik.app`),
+Instagram → SnapInsta (`snapinsta.to`, domain unconfirmed by the operator); SnapTube is recorded
+as Android-only with no verified browser tool, so it is offered for no platform. Re-verify these
+sites periodically: they publish no authoritative domain lists and clones are common.
+
 **Bulk actions** (`bulkApply`): save, obtained, used, reject on up to 200 selected clusters;
 merged-away ids resolve to their survivor and collapse, each item is idempotent, failures are
 reported per item. The UI confirms Used and Reject. **Export** (`/export?format=csv|json` with

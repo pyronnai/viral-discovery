@@ -119,6 +119,7 @@ export function CandidateCard({ card }: { card: CardView }) {
           representations={card.representations}
           canonicalUrl={card.canonicalUrl}
           platform={card.platform}
+          platformKey={card.platformKey}
           access={card.access}
           compact
         />

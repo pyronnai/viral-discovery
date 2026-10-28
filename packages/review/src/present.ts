@@ -145,6 +145,8 @@ export interface CardView {
   href: string;
   canonicalUrl: string;
   platform: string;
+  /** Raw canonical platform key (e.g. "tiktok"); `platform` is the display name. */
+  platformKey: string;
   title: string;
   creator: string | null;
   creatorHandle: string | null;
@@ -237,6 +239,7 @@ export function toCardView(row: FeedRow, roles: SightingRoles, now: Date): CardV
     href: `/candidates/${row.clusterId}`,
     canonicalUrl: row.canonicalUrl,
     platform: platformName(row.platform),
+    platformKey: row.platform,
     title: row.title ?? row.caption?.slice(0, 140) ?? '(untitled)',
     creator: row.creatorName,
     creatorHandle: row.creatorHandle,
