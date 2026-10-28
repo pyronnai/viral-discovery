@@ -59,18 +59,21 @@ export const DOWNLOADER_PROVIDERS: readonly DownloaderProvider[] = [
     id: 'snapinsta',
     name: 'SnapInsta',
     website: 'https://snapinsta.to/',
-    platforms: ['instagram'],
-    instructions: 'Paste the Instagram link into the SnapInsta input field and press Download.',
+    // DISABLED: no SnapInsta domain could be established as the authoritative
+    // official site, so no Instagram handoff is offered. Re-enable (platforms:
+    // ['instagram'], webTool: true) only after the domain is reliably verified.
+    platforms: [],
+    instructions: 'SnapInsta is disabled until its official domain is verified.',
     prefill: null,
-    webTool: true,
+    webTool: false,
     verification: {
       checkedOn: VERIFIED_ON,
       status: 'unconfirmed',
       evidence:
         'SnapInsta publishes no authoritative domain list. snapinsta.to is the most-referenced and ' +
-        'most-visited SnapInsta domain (Instagram videos/reels/stories/photos; paste-a-link); ' +
-        'snapinsta.app no longer resolves, snapinsta.com is a placeholder, and snapinsta.ai also ' +
-        'claims to be official. Confirm the domain before relying on it. No documented prefill.',
+        'most-visited SnapInsta domain (Instagram videos/reels/stories/photos; paste-a-link) but ' +
+        'could not be confirmed as official; snapinsta.app no longer resolves, snapinsta.com is a ' +
+        'placeholder, and snapinsta.ai also claims to be official. Not offered until confirmed.',
     },
   },
   {

@@ -232,7 +232,7 @@ describe('inbox components', () => {
     expect(closed).not.toContain('snaptik.app');
   });
 
-  it('download menu: Instagram → SnapInsta; unsupported platforms invent nothing', () => {
+  it('download menu: Instagram offers no unverified provider; unsupported platforms invent nothing', () => {
     const insta = html(
       createElement(DownloadMenu, {
         clusterId: 'c',
@@ -242,9 +242,11 @@ describe('inbox components', () => {
         defaultOpen: true,
       }),
     );
-    expect(insta).toContain('SnapInsta ↗');
-    expect(insta).toContain('href="https://snapinsta.to/"');
-    expect(insta).not.toContain('SnapTik');
+    // SnapInsta is configured but disabled (domain unverified): Instagram is unsupported.
+    expect(insta).not.toMatch(/snapinsta|snaptik|snaptube/i);
+    expect(insta).toContain('No configured external downloader for this platform.');
+    expect(insta).toContain('Copy original URL');
+    expect(insta).toContain('Open original on Instagram ↗');
     for (const [key, name] of [
       ['youtube', 'YouTube'],
       ['twitch', 'Twitch'],

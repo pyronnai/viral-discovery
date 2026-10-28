@@ -105,7 +105,7 @@ pnpm cli duplicates explain <videoA> <videoB>   # evidence for one pair, stores 
   most viewed, recently discovered) — all in the URL.
 - Per card: **▶ Open original** · **⬇ Download ▾** (menu: the official/authorized file when a
   `media_assets` row exists; a clipboard + new-tab handoff to a verified external downloader for
-  the platform — TikTok → SnapTik, Instagram → SnapInsta, configured in
+  the platform — TikTok → SnapTik; SnapInsta/SnapTube disabled until verified; configured in
   `apps/web/src/lib/downloaders.ts`; Copy original URL) (plus "Also on" links for confirmed reposts on other
   platforms), ☆ Save, ⬇ Obtained, Used; Approve/Reject and Details as secondary actions.
 - Select several cards for bulk Save / Obtained / Used / Reject (broad actions ask first), and

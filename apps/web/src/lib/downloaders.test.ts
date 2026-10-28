@@ -32,14 +32,30 @@ describe('downloader provider configuration', () => {
     expect(providerById('nope')).toBeNull();
   });
 
-  it('maps TikTok → SnapTik and Instagram → SnapInsta', () => {
+  it('maps TikTok → SnapTik', () => {
     expect(downloadersFor('tiktok').map((p) => p.id)).toEqual(['snaptik']);
     expect(downloadersFor('TikTok ').map((p) => p.id)).toEqual(['snaptik']);
-    expect(downloadersFor('instagram').map((p) => p.id)).toEqual(['snapinsta']);
+  });
+
+  it('offers no Instagram handoff while the SnapInsta domain is unverified', () => {
+    expect(downloadersFor('instagram')).toEqual([]);
+    const snapinsta = providerById('snapinsta')!;
+    expect(snapinsta.webTool).toBe(false);
+    expect(snapinsta.platforms).toEqual([]);
+    expect(snapinsta.verification.status).toBe('unconfirmed');
   });
 
   it('invents nothing for platforms without a verified web tool', () => {
-    for (const platform of ['youtube', 'twitch', 'bluesky', 'manual', 'reddit', '', 'snaptik'])
+    for (const platform of [
+      'youtube',
+      'twitch',
+      'bluesky',
+      'instagram',
+      'manual',
+      'reddit',
+      '',
+      'snaptik',
+    ])
       expect(downloadersFor(platform), platform).toEqual([]);
     // SnapTube is configured (so its status is recorded) but offers no verified web tool.
     const snaptube = providerById('snaptube')!;
@@ -54,9 +70,6 @@ describe('downloader provider configuration', () => {
     expect(h.copyText).toBe(TIKTOK);
     expect(h.href).toBe('https://snaptik.app/');
     expect(h.copiedMessage).toBe('Video link copied — paste it into SnapTik.');
-    expect(
-      handoffFor(providerById('snapinsta')!, 'https://www.instagram.com/reel/x/').copiedMessage,
-    ).toBe('Video link copied — paste it into SnapInsta.');
   });
 
   it('lets no candidate-controlled value alter the downloader hostname', () => {

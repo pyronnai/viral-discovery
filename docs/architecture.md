@@ -535,10 +535,11 @@ candidate's canonical URL to the clipboard and opens the service's website in a 
 configured website — no candidate value can reach it — and nothing passes through the backend.
 If the clipboard is unavailable the site still opens and the URL is shown with a Copy button.
 Platforms without a verified web tool get "No configured external downloader for this platform."
-plus Copy original URL / Open original. Mapping today: TikTok → SnapTik (`snaptik.app`),
-Instagram → SnapInsta (`snapinsta.to`, domain unconfirmed by the operator); SnapTube is recorded
-as Android-only with no verified browser tool, so it is offered for no platform. Re-verify these
-sites periodically: they publish no authoritative domain lists and clones are common.
+plus Copy original URL / Open original. Mapping today: TikTok → SnapTik (`snaptik.app`) only.
+SnapInsta is recorded but disabled (no domain could be confirmed as official, so Instagram is
+unsupported); SnapTube is recorded as Android-only with no verified browser tool, so it is offered
+for no platform. Re-verify these sites periodically: they publish no authoritative domain lists
+and clones are common.
 
 **Bulk actions** (`bulkApply`): save, obtained, used, reject on up to 200 selected clusters;
 merged-away ids resolve to their survivor and collapse, each item is idempotent, failures are
